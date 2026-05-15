@@ -42,6 +42,12 @@ def decode_chlorinator_broadcast(payload: bytes, state: PoolState) -> None:
     NOTE: Salt level is typically NOT in this broadcast — it comes from
     the chlorinator sub-protocol action 18 response.
     """
+    _LOGGER.debug(
+        "CHLOR Action 25 raw payload (%d bytes): [%s]",
+        len(payload),
+        ", ".join(str(b) for b in payload),
+    )
+
     if len(payload) < 2:
         _LOGGER.warning(
             "Chlorinator broadcast payload too short (%d bytes) - skipping",
@@ -61,6 +67,14 @@ def decode_chlorinator_broadcast(payload: bytes, state: PoolState) -> None:
         chlor.super_chlor = payload[3] > 0
     if len(payload) > 4:
         chlor.status = payload[4] & 0x7F
+
+    _LOGGER.debug(
+        "CHLOR Action 25 decoded: pool_sp=%d%% spa_sp=%d%% super_hours=%d status=%d",
+        chlor.pool_setpoint,
+        chlor.spa_setpoint,
+        chlor.super_chlor_hours,
+        chlor.status,
+    )
 
 
 def decode_chlorinator_action(
@@ -85,6 +99,14 @@ def decode_chlorinator_action(
     state:
         The ``PoolState`` to update.
     """
+    _LOGGER.debug(
+        "CHLOR sub-protocol action=%d dest=%d raw payload (%d bytes): [%s]",
+        action,
+        dest,
+        len(payload),
+        ", ".join(str(b) for b in payload),
+    )
+
     chlor = state.get_chlorinator(1)
 
     if action == 3:
