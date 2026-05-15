@@ -14,7 +14,7 @@ def _make_raw_packet(
     source: int = 16,
     action: int = 2,
     payload: bytes = b"",
-    version: int = 1,
+    version: int = 33,
 ) -> bytes:
     """Build a raw packet with preamble and checksum for testing."""
     return build_packet(dest, source, action, payload, version)
@@ -29,7 +29,7 @@ class TestBuildPacket:
         assert pkt[:3] == bytes([0xFF, 0x00, 0xFF])
         # Header start
         assert pkt[3] == 0xA5  # 165
-        assert pkt[4] == 1  # version
+        assert pkt[4] == 33  # version (headerSubByte for EasyTouch)
         assert pkt[5] == 16  # dest
         assert pkt[6] == 33  # source
         assert pkt[7] == 134  # action

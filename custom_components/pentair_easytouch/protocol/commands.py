@@ -113,6 +113,7 @@ class CommandManager:
         action: int,
         payload: list[int],
         dest: int = CONTROLLER_ADDR,
+        version: int = 33,
     ) -> None:
         """Build a packet and write it to the transport."""
         packet = build_packet(
@@ -120,6 +121,7 @@ class CommandManager:
             source=self._source_addr,
             action=action,
             payload=payload,
+            version=version,
         )
         await self._transport.write(packet)
 
@@ -426,4 +428,4 @@ class CommandManager:
             pump_address,
             speed_rpm,
         )
-        await self._send(PUMP_ACTION_SET_SPEED, payload, dest=pump_address)
+        await self._send(PUMP_ACTION_SET_SPEED, payload, dest=pump_address, version=0)

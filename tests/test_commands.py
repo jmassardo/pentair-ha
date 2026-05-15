@@ -610,3 +610,36 @@ class TestRequestConfig:
         await cmd.request_config(ACTION_GET_CIRCUITS, 255)
         pkt = _parse_last_packet(transport)
         assert pkt.payload == bytes([255])
+
+
+# ---------------------------------------------------------------------------
+# Protocol version / sub-byte
+# ---------------------------------------------------------------------------
+
+
+class TestProtocolVersionByte:
+    """Verify correct version byte (headerSubByte) per protocol type."""
+
+    async def test_controller_commands_use_version_33(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """Controller commands (set_circuit, heat, config) use version=33."""
+        await cmd.set_circuit_state(1, True)
+        pkt = _parse_last_packet(transport)
+        assert pkt.version == 33
+
+    async def test_config_request_uses_version_33(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """Config requests to controller use version=33."""
+        await cmd.request_config(ACTION_GET_CIRCUITS, 1)
+        pkt = _parse_last_packet(transport)
+        assert pkt.version == 33
+
+    async def test_pump_commands_use_version_0(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """Pump commands (direct to pump address) use version=0."""
+        await cmd.set_pump_speed(96, 2000)
+        pkt = _parse_last_packet(transport)
+        assert pkt.version == 0

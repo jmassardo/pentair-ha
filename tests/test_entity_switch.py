@@ -32,8 +32,8 @@ def _make_coordinator(state: PoolState | None = None) -> MagicMock:
 def _make_state() -> PoolState:
     state = PoolState()
     state.circuits = [
-        Circuit(id=1, name="Filter Pump", is_on=True, is_light=False),
-        Circuit(id=2, name="Pool Light", is_on=False, is_light=True),
+        Circuit(id=1, name="Filter Pump", is_on=True, is_light=False, is_active=True),
+        Circuit(id=2, name="Pool Light", is_on=False, is_light=True, is_active=True),
     ]
     state.features = [Feature(id=11, name="Waterfall", is_on=True)]
     return state
@@ -170,7 +170,7 @@ async def test_dynamic_discovery_adds_new_entities() -> None:
 
     # Simulate equipment arriving via coordinator update
     state.circuits = [
-        Circuit(id=3, name="Spa Jets", is_on=False, is_light=False),
+        Circuit(id=3, name="Spa Jets", is_on=False, is_light=False, is_active=True),
     ]
     state.features = [Feature(id=12, name="Spillover", is_on=False)]
 

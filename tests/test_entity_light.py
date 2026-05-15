@@ -39,9 +39,10 @@ def _make_state() -> PoolState:
             name="Pool Light",
             is_on=True,
             is_light=True,
+            is_active=True,
             lighting_theme=LightTheme.PARTY,
         ),
-        Circuit(id=1, name="Filter Pump", is_on=True, is_light=False),
+        Circuit(id=1, name="Filter Pump", is_on=True, is_light=False, is_active=True),
     ]
     return state
 
@@ -143,7 +144,7 @@ async def test_dynamic_discovery_adds_new_light_entities() -> None:
 
     # Simulate a light circuit arriving
     state.circuits = [
-        Circuit(id=7, name="Pool Light", is_on=True, is_light=True),
+        Circuit(id=7, name="Pool Light", is_on=True, is_light=True, is_active=True),
     ]
 
     discover_cb = coordinator.async_add_listener.call_args.args[0]

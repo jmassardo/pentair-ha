@@ -212,7 +212,7 @@ class TestMixedProtocolFrames:
         framer.feed(std + chlor)
 
         assert len(received) == 2
-        assert received[0].version == 1  # standard
+        assert received[0].version == 33  # standard
         assert received[0].action == 2
         assert received[1].version == 0  # chlorinator
         assert received[1].action == 18
@@ -229,7 +229,7 @@ class TestMixedProtocolFrames:
         assert len(received) == 2
         assert received[0].version == 0
         assert received[0].action == 17
-        assert received[1].version == 1
+        assert received[1].version == 33
         assert received[1].action == 5
 
     def test_interleaved_frames(self) -> None:
@@ -246,11 +246,11 @@ class TestMixedProtocolFrames:
 
         assert len(received) == 4
         assert received[0].action == 2
-        assert received[0].version == 1
+        assert received[0].version == 33
         assert received[1].action == 18
         assert received[1].version == 0
         assert received[2].action == 8
-        assert received[2].version == 1
+        assert received[2].version == 33
         assert received[3].action == 17
         assert received[3].version == 0
 
@@ -269,7 +269,7 @@ class TestMixedProtocolFrames:
 
         # Should parse as exactly one standard frame, not a chlorinator frame
         assert len(received) == 1
-        assert received[0].version == 1
+        assert received[0].version == 33
         assert received[0].action == 2
         assert received[0].payload == payload
 

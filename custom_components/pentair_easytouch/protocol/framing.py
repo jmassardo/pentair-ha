@@ -372,7 +372,7 @@ def build_packet(
     source: int,
     action: int,
     payload: bytes | list[int] = b"",
-    version: int = 1,
+    version: int = 33,
 ) -> bytes:
     """Build a complete Pentair RS485 packet ready for transmission.
 
@@ -390,7 +390,8 @@ def build_packet(
     payload:
         Payload bytes.
     version:
-        Protocol version / sub byte (default 1).
+        Protocol version / sub byte.  Use 33 for controller communication
+        (EasyTouch standard), 0 for pump/valve/chem sub-protocols.
     """
     if isinstance(payload, list):
         payload = bytes(payload)
