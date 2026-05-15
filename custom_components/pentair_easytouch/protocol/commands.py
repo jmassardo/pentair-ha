@@ -27,6 +27,14 @@ from custom_components.pentair_easytouch.const import (
 )
 from custom_components.pentair_easytouch.protocol.framing import build_packet
 
+# Valid action codes for config requests (ACTION_GET_* range)
+_MIN_CONFIG_ACTION = 197
+_MAX_CONFIG_ACTION = 253
+
+# Valid item IDs for config requests
+_MIN_ITEM_ID = 0
+_MAX_ITEM_ID = 255
+
 if TYPE_CHECKING:
     from custom_components.pentair_easytouch.protocol.transport import BaseTransport
 
@@ -114,6 +122,30 @@ class CommandManager:
             payload=payload,
         )
         await self._transport.write(packet)
+
+    # ------------------------------------------------------------------
+    # Config requests
+    # ------------------------------------------------------------------
+
+    async def request_config(self, action: int, item_id: int) -> None:
+        """Request configuration data from the controller.
+
+        Sends a GET request to the controller for a specific config item.
+        The controller responds with the corresponding config broadcast
+        (e.g. action 203 → response action 11 for circuit config).
+
+        Parameters
+        ----------
+        action:
+            Config request action code (197-253, e.g.
+            ``ACTION_GET_CIRCUITS`` = 203).
+        item_id:
+            Item identifier to request (0-255, e.g. circuit number 1-20).
+        """
+        _validate_range(action, _MIN_CONFIG_ACTION, _MAX_CONFIG_ACTION, "action")
+        _validate_range(item_id, _MIN_ITEM_ID, _MAX_ITEM_ID, "item_id")
+        _LOGGER.debug("CMD request_config action=%d item_id=%d", action, item_id)
+        await self._send(action, [item_id])
 
     # ------------------------------------------------------------------
     # Circuit control

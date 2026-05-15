@@ -23,7 +23,7 @@ from .config_flow import (
     CONF_SERIAL_PORT,
     CONNECTION_TCP,
 )
-from .const import DOMAIN
+from .const import ACTION_GET_CIRCUITS, DOMAIN
 from .model import PoolState
 from .protocol.commands import CommandManager
 from .protocol.framing import PacketFramer
@@ -37,6 +37,13 @@ if TYPE_CHECKING:
     from .protocol.framing import PentairPacket
 
 _LOGGER = logging.getLogger(__name__)
+
+# Delay between config requests to avoid flooding the RS485 bus (seconds).
+_CONFIG_REQUEST_DELAY = 0.05  # 50ms, matching nodejs-poolController
+
+# Range of circuit IDs to request config for.
+_CONFIG_CIRCUIT_MIN = 1
+_CONFIG_CIRCUIT_MAX = 20
 
 
 class PentairCoordinator(DataUpdateCoordinator[PoolState]):
@@ -75,6 +82,13 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         # Signals when the first status broadcast has been received and processed
         self._first_update_event = asyncio.Event()
 
+        # Dual-gate flags: entity discovery waits for BOTH status and config
+        self._status_received = False
+        self._config_received = False
+
+        # Reference to the config request background task
+        self._config_request_task: asyncio.Task[None] | None = None
+
     @property
     def command_manager(self) -> CommandManager:
         """Return the command manager for entities to send commands."""
@@ -93,6 +107,10 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         """Start the transport connection and begin listening."""
         _LOGGER.info("Starting Pentair EasyTouch coordinator")
         await self._transport.connect()
+        # Request circuit configuration from the controller.
+        # The controller only broadcasts Action 11 during power-up, so we
+        # must actively request it if we start after the controller.
+        self._config_request_task = asyncio.create_task(self._async_request_config())
 
     async def stop(self) -> None:
         """Disconnect transport and clean up."""
@@ -134,11 +152,52 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
     def _on_state_updated(self) -> None:
         """Called when the router updates the pool state.
 
-        Pushes the updated state to all listening entities.
+        Pushes the updated state to all listening entities.  The first-update
+        event is held until **both** a status broadcast (Action 2) and circuit
+        configuration (Action 11) have been received, so that entities are
+        registered with their proper names.
         """
         self.async_set_updated_data(self._state)
         if not self._first_update_event.is_set():
-            self._first_update_event.set()
+            # Check for status: any circuit existing means Action 2 arrived
+            if self._state.circuits and not self._status_received:
+                self._status_received = True
+                _LOGGER.debug("First status broadcast received")
+            # Check for config: any circuit with a non-empty name means
+            # Action 11 data has been processed
+            if not self._config_received:
+                for circuit in self._state.circuits:
+                    if circuit.name:
+                        self._config_received = True
+                        _LOGGER.debug("Circuit config received")
+                        break
+            if self._status_received and self._config_received:
+                self._first_update_event.set()
+
+    async def _async_request_config(self) -> None:
+        """Send GET_CIRCUITS requests for circuits 1-20.
+
+        The controller responds with Action 11 (circuit name/function) for
+        each requested circuit.  A 50ms delay is inserted between requests
+        to avoid flooding the RS485 bus, matching the reference
+        implementation (nodejs-poolController).
+        """
+        _LOGGER.debug(
+            "Requesting circuit config for circuits %d-%d",
+            _CONFIG_CIRCUIT_MIN,
+            _CONFIG_CIRCUIT_MAX,
+        )
+        for circuit_id in range(_CONFIG_CIRCUIT_MIN, _CONFIG_CIRCUIT_MAX + 1):
+            try:
+                await self._command_manager.request_config(ACTION_GET_CIRCUITS, circuit_id)
+            except Exception:
+                _LOGGER.debug(
+                    "Failed to request config for circuit %d",
+                    circuit_id,
+                    exc_info=True,
+                )
+            await asyncio.sleep(_CONFIG_REQUEST_DELAY)
+        _LOGGER.debug("Circuit config requests complete")
 
     # ------------------------------------------------------------------
     # Helpers

@@ -6,6 +6,7 @@ import pytest
 
 from custom_components.pentair_easytouch.const import (
     ACTION_CANCEL_DELAY,
+    ACTION_GET_CIRCUITS,
     ACTION_INTELLIBRITE,
     ACTION_SET_CHLORINATOR,
     ACTION_SET_CIRCUIT,
@@ -536,3 +537,76 @@ class TestTransportInteraction:
         cmd = CommandManager(transport)
         with pytest.raises(ConnectionError):
             await cmd.set_circuit_state(6, True)
+
+
+# ---------------------------------------------------------------------------
+# request_config
+# ---------------------------------------------------------------------------
+
+
+class TestRequestConfig:
+    """Tests for ``request_config``."""
+
+    async def test_request_circuit_config(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """request_config builds correct packet for GET_CIRCUITS."""
+        await cmd.request_config(ACTION_GET_CIRCUITS, 1)
+        pkt = _parse_last_packet(transport)
+        assert pkt.action == ACTION_GET_CIRCUITS
+        assert pkt.dest == CONTROLLER_ADDR
+        assert pkt.source == REMOTE_ADDR
+        assert pkt.payload == bytes([1])
+
+    async def test_request_config_various_item_ids(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """request_config sends correct item_id in payload."""
+        for item_id in [1, 5, 10, 20]:
+            await cmd.request_config(ACTION_GET_CIRCUITS, item_id)
+            pkt = _parse_last_packet(transport)
+            assert pkt.payload == bytes([item_id])
+
+    async def test_request_config_invalid_action_low(self, cmd: CommandManager) -> None:
+        """request_config rejects action codes below valid range."""
+        with pytest.raises(ValueError, match="action must be between"):
+            await cmd.request_config(100, 1)
+
+    async def test_request_config_invalid_action_high(self, cmd: CommandManager) -> None:
+        """request_config rejects action codes above valid range."""
+        with pytest.raises(ValueError, match="action must be between"):
+            await cmd.request_config(254, 1)
+
+    async def test_request_config_invalid_item_id_low(self, cmd: CommandManager) -> None:
+        """request_config rejects negative item_id."""
+        with pytest.raises(ValueError, match="item_id must be between"):
+            await cmd.request_config(ACTION_GET_CIRCUITS, -1)
+
+    async def test_request_config_invalid_item_id_high(self, cmd: CommandManager) -> None:
+        """request_config rejects item_id above 255."""
+        with pytest.raises(ValueError, match="item_id must be between"):
+            await cmd.request_config(ACTION_GET_CIRCUITS, 256)
+
+    async def test_request_config_boundary_action_values(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """request_config accepts boundary action codes 197 and 253."""
+        await cmd.request_config(197, 0)
+        pkt = _parse_last_packet(transport)
+        assert pkt.action == 197
+
+        await cmd.request_config(253, 0)
+        pkt = _parse_last_packet(transport)
+        assert pkt.action == 253
+
+    async def test_request_config_boundary_item_ids(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """request_config accepts boundary item IDs 0 and 255."""
+        await cmd.request_config(ACTION_GET_CIRCUITS, 0)
+        pkt = _parse_last_packet(transport)
+        assert pkt.payload == bytes([0])
+
+        await cmd.request_config(ACTION_GET_CIRCUITS, 255)
+        pkt = _parse_last_packet(transport)
+        assert pkt.payload == bytes([255])
