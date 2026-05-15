@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -30,16 +31,35 @@ async def async_setup_entry(
     """Set up Pentair circuit and feature switches."""
     coordinator: PentairCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[SwitchEntity] = []
-    if coordinator.data is not None:
+    known_ids: set[str] = set()
+
+    @callback
+    def _async_discover_entities() -> None:
+        """Discover and add new circuit/feature switch entities."""
+        new_entities: list[SwitchEntity] = []
+        if coordinator.data is None:
+            return
+
         for circuit in coordinator.data.circuits:
-            if not circuit.is_light:
-                entities.append(PentairCircuitSwitch(coordinator, circuit.id))
+            uid = f"circuit_{circuit.id}"
+            if uid not in known_ids and not circuit.is_light:
+                known_ids.add(uid)
+                new_entities.append(PentairCircuitSwitch(coordinator, circuit.id))
 
         for feature in coordinator.data.features:
-            entities.append(PentairFeatureSwitch(coordinator, feature.id))
+            uid = f"feature_{feature.id}"
+            if uid not in known_ids:
+                known_ids.add(uid)
+                new_entities.append(PentairFeatureSwitch(coordinator, feature.id))
 
-    async_add_entities(entities)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add initial entities from current state
+    _async_discover_entities()
+
+    # Listen for coordinator updates to discover new entities
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class PentairCircuitSwitch(CoordinatorEntity[PentairCoordinator], SwitchEntity):

@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -41,12 +42,29 @@ async def async_setup_entry(
     """Set up Pentair select entities."""
     coordinator: PentairCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[SelectEntity] = []
-    if coordinator.data is not None:
-        for body in coordinator.data.bodies:
-            entities.append(PentairHeatModeSelect(coordinator, body.id))
+    known_ids: set[str] = set()
 
-    async_add_entities(entities)
+    @callback
+    def _async_discover_entities() -> None:
+        """Discover and add new heat mode select entities."""
+        new_entities: list[SelectEntity] = []
+        if coordinator.data is None:
+            return
+
+        for body in coordinator.data.bodies:
+            uid = f"heat_mode_{body.id}"
+            if uid not in known_ids:
+                known_ids.add(uid)
+                new_entities.append(PentairHeatModeSelect(coordinator, body.id))
+
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add initial entities from current state
+    _async_discover_entities()
+
+    # Listen for coordinator updates to discover new entities
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class PentairHeatModeSelect(CoordinatorEntity[PentairCoordinator], SelectEntity):

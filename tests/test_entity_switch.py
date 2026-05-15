@@ -126,9 +126,63 @@ async def test_async_setup_entry_filters_out_light_circuits() -> None:
 
     await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
 
+    # Initial discovery should add non-light circuits and features
     entities = async_add_entities.call_args.args[0]
     assert [type(entity) for entity in entities] == [
         PentairCircuitSwitch,
         PentairFeatureSwitch,
     ]
     assert [entity.name for entity in entities] == ["Filter Pump", "Waterfall"]
+
+    # Listener should be registered for dynamic discovery
+    coordinator.async_add_listener.assert_called_once()
+    coordinator.config_entry.async_on_unload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_skips_when_no_data() -> None:
+    coordinator = _make_coordinator(None)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    # No entities should be added when data is None
+    async_add_entities.assert_not_called()
+
+    # Listener should still be registered for later discovery
+    coordinator.async_add_listener.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dynamic_discovery_adds_new_entities() -> None:
+    state = PoolState()
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    # No entities initially
+    async_add_entities.assert_not_called()
+
+    # Simulate equipment arriving via coordinator update
+    state.circuits = [
+        Circuit(id=3, name="Spa Jets", is_on=False, is_light=False),
+    ]
+    state.features = [Feature(id=12, name="Spillover", is_on=False)]
+
+    # Call the registered listener callback
+    discover_cb = coordinator.async_add_listener.call_args.args[0]
+    discover_cb()
+
+    entities = async_add_entities.call_args.args[0]
+    assert len(entities) == 2
+    assert [entity.name for entity in entities] == ["Spa Jets", "Spillover"]
+
+    # Call again - should not add duplicates
+    async_add_entities.reset_mock()
+    discover_cb()
+    async_add_entities.assert_not_called()

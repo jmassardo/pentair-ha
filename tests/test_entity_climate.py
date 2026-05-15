@@ -225,3 +225,36 @@ async def test_async_setup_entry_adds_body_climates() -> None:
 
     entities = async_add_entities.call_args.args[0]
     assert [entity.name for entity in entities] == ["Pool", "Spa"]
+
+    # Listener should be registered for dynamic discovery
+    coordinator.async_add_listener.assert_called_once()
+    coordinator.config_entry.async_on_unload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dynamic_discovery_adds_new_body_climates() -> None:
+    state = PoolState()
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    # No bodies initially
+    async_add_entities.assert_not_called()
+
+    # Simulate bodies arriving
+    state.bodies = [PoolBody(id=1, name="Pool", is_on=True)]
+
+    discover_cb = coordinator.async_add_listener.call_args.args[0]
+    discover_cb()
+
+    entities = async_add_entities.call_args.args[0]
+    assert len(entities) == 1
+    assert entities[0].name == "Pool"
+
+    # Call again - should not add duplicates
+    async_add_entities.reset_mock()
+    discover_cb()
+    async_add_entities.assert_not_called()

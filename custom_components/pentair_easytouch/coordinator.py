@@ -9,6 +9,7 @@ a *push* model (``async_set_updated_data``) rather than polling.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -71,6 +72,9 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         # Expose initial data so entities have something before first broadcast
         self.data = self._state
 
+        # Signals when the first status broadcast has been received and processed
+        self._first_update_event = asyncio.Event()
+
     @property
     def command_manager(self) -> CommandManager:
         """Return the command manager for entities to send commands."""
@@ -95,6 +99,25 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         _LOGGER.info("Stopping Pentair EasyTouch coordinator")
         await self._transport.disconnect()
 
+    async def wait_for_first_update(self, timeout: float = 10.0) -> None:
+        """Wait for the first status broadcast to populate equipment state.
+
+        Parameters
+        ----------
+        timeout:
+            Maximum seconds to wait for the first status broadcast.
+            If the timeout expires entities will be added as equipment is
+            discovered dynamically.
+        """
+        try:
+            await asyncio.wait_for(self._first_update_event.wait(), timeout)
+        except TimeoutError:
+            _LOGGER.warning(
+                "Timed out waiting for first status broadcast after %.1fs. "
+                "Entities will be added as equipment is discovered.",
+                timeout,
+            )
+
     # ------------------------------------------------------------------
     # Protocol pipeline callbacks
     # ------------------------------------------------------------------
@@ -114,6 +137,8 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         Pushes the updated state to all listening entities.
         """
         self.async_set_updated_data(self._state)
+        if not self._first_update_event.is_set():
+            self._first_update_event.set()
 
     # ------------------------------------------------------------------
     # Helpers

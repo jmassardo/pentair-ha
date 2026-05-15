@@ -10,6 +10,7 @@ from homeassistant.components.light import (
     LightEntity,
 )
 from homeassistant.components.light.const import ColorMode, LightEntityFeature
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -58,13 +59,29 @@ async def async_setup_entry(
     """Set up Pentair light entities."""
     coordinator: PentairCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[LightEntity] = []
-    if coordinator.data is not None:
-        for circuit in coordinator.data.circuits:
-            if circuit.is_light:
-                entities.append(PentairLight(coordinator, circuit.id))
+    known_ids: set[str] = set()
 
-    async_add_entities(entities)
+    @callback
+    def _async_discover_entities() -> None:
+        """Discover and add new light entities."""
+        new_entities: list[LightEntity] = []
+        if coordinator.data is None:
+            return
+
+        for circuit in coordinator.data.circuits:
+            uid = f"light_{circuit.id}"
+            if uid not in known_ids and circuit.is_light:
+                known_ids.add(uid)
+                new_entities.append(PentairLight(coordinator, circuit.id))
+
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add initial entities from current state
+    _async_discover_entities()
+
+    # Listen for coordinator updates to discover new entities
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class PentairLight(CoordinatorEntity[PentairCoordinator], LightEntity):

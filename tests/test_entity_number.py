@@ -110,3 +110,36 @@ async def test_async_setup_entry_adds_pool_and_spa_numbers() -> None:
 
     entities = async_add_entities.call_args.args[0]
     assert [entity.name for entity in entities] == ["IC40 Pool Setpoint", "IC40 Spa Setpoint"]
+
+    # Listener should be registered for dynamic discovery
+    coordinator.async_add_listener.assert_called_once()
+    coordinator.config_entry.async_on_unload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_number_dynamic_discovery_adds_new_chlorinators() -> None:
+    state = PoolState()
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    # No chlorinators initially
+    async_add_entities.assert_not_called()
+
+    # Simulate a chlorinator arriving
+    state.chlorinators = [Chlorinator(id=1, name="IC40", pool_setpoint=40, spa_setpoint=10)]
+
+    discover_cb = coordinator.async_add_listener.call_args.args[0]
+    discover_cb()
+
+    entities = async_add_entities.call_args.args[0]
+    assert len(entities) == 2
+    assert [e.name for e in entities] == ["IC40 Pool Setpoint", "IC40 Spa Setpoint"]
+
+    # Call again - should not add duplicates
+    async_add_entities.reset_mock()
+    discover_cb()
+    async_add_entities.assert_not_called()

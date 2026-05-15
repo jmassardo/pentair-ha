@@ -116,11 +116,56 @@ async def test_async_setup_entry_adds_expected_entities() -> None:
 
     await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
 
-    entities = async_add_entities.call_args.args[0]
-    assert len(entities) == 5
-    names = {entity.name for entity in entities}
-    assert "Freeze Protection" in names
-    assert "Delay Active" in names
-    assert "Pool Heater Active" in names
-    assert "Filter Pump Running" in names
-    assert "Waterfall Valve Diverted" in names
+    # First call: static sensors (2)
+    # Second call: dynamic equipment sensors (3)
+    assert async_add_entities.call_count == 2
+
+    static_entities = async_add_entities.call_args_list[0].args[0]
+    assert len(static_entities) == 2
+
+    dynamic_entities = async_add_entities.call_args_list[1].args[0]
+    assert len(dynamic_entities) == 3
+
+    all_names = {e.name for e in static_entities} | {e.name for e in dynamic_entities}
+    assert "Freeze Protection" in all_names
+    assert "Delay Active" in all_names
+    assert "Pool Heater Active" in all_names
+    assert "Filter Pump Running" in all_names
+    assert "Waterfall Valve Diverted" in all_names
+
+    # Listener should be registered for dynamic discovery
+    coordinator.async_add_listener.assert_called_once()
+    coordinator.config_entry.async_on_unload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_dynamic_discovery_adds_new_equipment() -> None:
+    state = PoolState()
+    state.freeze = False
+    state.delay = 0
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    # Only static sensors initially (1 call)
+    assert async_add_entities.call_count == 1
+
+    # Simulate a pump arriving
+    state.pumps = [Pump(id=2, name="Booster Pump", is_active=True)]
+
+    discover_cb = coordinator.async_add_listener.call_args.args[0]
+    discover_cb()
+
+    # Second call with dynamic pump running sensor
+    assert async_add_entities.call_count == 2
+    dynamic_entities = async_add_entities.call_args.args[0]
+    assert len(dynamic_entities) == 1
+    assert dynamic_entities[0].name == "Booster Pump Running"
+
+    # Call again - should not add duplicates
+    async_add_entities.reset_mock()
+    discover_cb()
+    async_add_entities.assert_not_called()

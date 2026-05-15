@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -30,13 +31,33 @@ async def async_setup_entry(
     """Set up Pentair number entities."""
     coordinator: PentairCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[NumberEntity] = []
-    if coordinator.data is not None:
-        for chlor in coordinator.data.chlorinators:
-            entities.append(PentairChlorSetpointNumber(coordinator, chlor.id, "pool"))
-            entities.append(PentairChlorSetpointNumber(coordinator, chlor.id, "spa"))
+    known_ids: set[str] = set()
 
-    async_add_entities(entities)
+    @callback
+    def _async_discover_entities() -> None:
+        """Discover and add new chlorinator setpoint number entities."""
+        new_entities: list[NumberEntity] = []
+        if coordinator.data is None:
+            return
+
+        for chlor in coordinator.data.chlorinators:
+            uid_pool = f"chlor_{chlor.id}_pool"
+            if uid_pool not in known_ids:
+                known_ids.add(uid_pool)
+                new_entities.append(PentairChlorSetpointNumber(coordinator, chlor.id, "pool"))
+            uid_spa = f"chlor_{chlor.id}_spa"
+            if uid_spa not in known_ids:
+                known_ids.add(uid_spa)
+                new_entities.append(PentairChlorSetpointNumber(coordinator, chlor.id, "spa"))
+
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add initial entities from current state
+    _async_discover_entities()
+
+    # Listen for coordinator updates to discover new entities
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class PentairChlorSetpointNumber(CoordinatorEntity[PentairCoordinator], NumberEntity):

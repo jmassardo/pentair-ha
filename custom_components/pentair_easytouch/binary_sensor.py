@@ -9,6 +9,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -34,22 +35,49 @@ async def async_setup_entry(
     """Set up Pentair binary sensor entities."""
     coordinator: PentairCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[BinarySensorEntity] = [
+    # Static binary sensors are always created (unconditionally available)
+    static_entities: list[BinarySensorEntity] = [
         PentairFreezeProtectSensor(coordinator),
         PentairDelaySensor(coordinator),
     ]
+    async_add_entities(static_entities)
 
-    if coordinator.data is not None:
+    # Dynamic binary sensors discovered from equipment lists
+    known_ids: set[str] = set()
+
+    @callback
+    def _async_discover_entities() -> None:
+        """Discover and add new equipment binary sensor entities."""
+        new_entities: list[BinarySensorEntity] = []
+        if coordinator.data is None:
+            return
+
         for body in coordinator.data.bodies:
-            entities.append(PentairHeaterActiveSensor(coordinator, body.id))
+            uid = f"heater_{body.id}"
+            if uid not in known_ids:
+                known_ids.add(uid)
+                new_entities.append(PentairHeaterActiveSensor(coordinator, body.id))
 
         for pump in coordinator.data.pumps:
-            entities.append(PentairPumpRunningSensor(coordinator, pump.id))
+            uid = f"pump_{pump.id}_running"
+            if uid not in known_ids:
+                known_ids.add(uid)
+                new_entities.append(PentairPumpRunningSensor(coordinator, pump.id))
 
         for valve in coordinator.data.valves:
-            entities.append(PentairValveDivertedSensor(coordinator, valve.id))
+            uid = f"valve_{valve.id}_diverted"
+            if uid not in known_ids:
+                known_ids.add(uid)
+                new_entities.append(PentairValveDivertedSensor(coordinator, valve.id))
 
-    async_add_entities(entities)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add initial dynamic entities from current state
+    _async_discover_entities()
+
+    # Listen for coordinator updates to discover new entities
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class PentairBinarySensorBase(CoordinatorEntity[PentairCoordinator], BinarySensorEntity):

@@ -14,6 +14,7 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfTemperature,
 )
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -39,25 +40,58 @@ async def async_setup_entry(
     """Set up Pentair sensor entities."""
     coordinator: PentairCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[SensorEntity] = [
+    # Static sensors are always created (unconditionally available)
+    static_entities: list[SensorEntity] = [
         PentairAirTempSensor(coordinator),
         PentairWaterSensor(coordinator, sensor_index=1),
         PentairWaterSensor(coordinator, sensor_index=2),
         PentairSolarTempSensor(coordinator),
         PentairSystemStatusSensor(coordinator),
     ]
+    async_add_entities(static_entities)
 
-    if coordinator.data is not None:
+    # Dynamic sensors discovered from equipment lists
+    known_ids: set[str] = set()
+
+    @callback
+    def _async_discover_entities() -> None:
+        """Discover and add new pump/chlorinator sensor entities."""
+        new_entities: list[SensorEntity] = []
+        if coordinator.data is None:
+            return
+
         for pump in coordinator.data.pumps:
-            entities.append(PentairPumpRpmSensor(coordinator, pump.id))
-            entities.append(PentairPumpWattsSensor(coordinator, pump.id))
-            entities.append(PentairPumpFlowSensor(coordinator, pump.id))
+            uid_rpm = f"pump_{pump.id}_rpm"
+            if uid_rpm not in known_ids:
+                known_ids.add(uid_rpm)
+                new_entities.append(PentairPumpRpmSensor(coordinator, pump.id))
+            uid_watts = f"pump_{pump.id}_watts"
+            if uid_watts not in known_ids:
+                known_ids.add(uid_watts)
+                new_entities.append(PentairPumpWattsSensor(coordinator, pump.id))
+            uid_flow = f"pump_{pump.id}_flow"
+            if uid_flow not in known_ids:
+                known_ids.add(uid_flow)
+                new_entities.append(PentairPumpFlowSensor(coordinator, pump.id))
 
         for chlor in coordinator.data.chlorinators:
-            entities.append(PentairSaltLevelSensor(coordinator, chlor.id))
-            entities.append(PentairChlorOutputSensor(coordinator, chlor.id))
+            uid_salt = f"chlor_{chlor.id}_salt"
+            if uid_salt not in known_ids:
+                known_ids.add(uid_salt)
+                new_entities.append(PentairSaltLevelSensor(coordinator, chlor.id))
+            uid_output = f"chlor_{chlor.id}_output"
+            if uid_output not in known_ids:
+                known_ids.add(uid_output)
+                new_entities.append(PentairChlorOutputSensor(coordinator, chlor.id))
 
-    async_add_entities(entities)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add initial dynamic entities from current state
+    _async_discover_entities()
+
+    # Listen for coordinator updates to discover new entities
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class PentairSensorBase(CoordinatorEntity[PentairCoordinator], SensorEntity):

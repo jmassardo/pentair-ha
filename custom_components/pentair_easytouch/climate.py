@@ -12,6 +12,7 @@ from homeassistant.components.climate.const import (
     HVACMode,
 )
 from homeassistant.const import UnitOfTemperature
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -53,12 +54,29 @@ async def async_setup_entry(
     """Set up Pentair climate entities."""
     coordinator: PentairCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[ClimateEntity] = []
-    if coordinator.data is not None:
-        for body in coordinator.data.bodies:
-            entities.append(PentairBodyClimate(coordinator, body.id))
+    known_ids: set[str] = set()
 
-    async_add_entities(entities)
+    @callback
+    def _async_discover_entities() -> None:
+        """Discover and add new climate entities."""
+        new_entities: list[ClimateEntity] = []
+        if coordinator.data is None:
+            return
+
+        for body in coordinator.data.bodies:
+            uid = f"climate_{body.id}"
+            if uid not in known_ids:
+                known_ids.add(uid)
+                new_entities.append(PentairBodyClimate(coordinator, body.id))
+
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Add initial entities from current state
+    _async_discover_entities()
+
+    # Listen for coordinator updates to discover new entities
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_entities))
 
 
 class PentairBodyClimate(CoordinatorEntity[PentairCoordinator], ClimateEntity):
