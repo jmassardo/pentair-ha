@@ -42,7 +42,7 @@ async def async_setup_entry(
 
         for circuit in coordinator.data.circuits:
             uid = f"circuit_{circuit.id}"
-            if uid not in known_ids and not circuit.is_light:
+            if uid not in known_ids and not circuit.is_light and circuit.is_active:
                 known_ids.add(uid)
                 new_entities.append(PentairCircuitSwitch(coordinator, circuit.id))
 

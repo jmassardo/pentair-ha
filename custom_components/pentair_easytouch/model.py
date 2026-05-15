@@ -52,6 +52,7 @@ class Circuit:
     freeze_protect: bool = False
     show_in_features: bool = False
     is_light: bool = False
+    is_active: bool = True  # False for unconfigured circuits (function=NOT_USED)
     lighting_theme: int = 0  # LightTheme value
 
 
