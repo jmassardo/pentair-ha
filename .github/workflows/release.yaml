@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set version from tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME}"
+          version="${version#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Update manifest version
+        run: |
+          python3 - <<'PY'
+          import json, os
+          path = "custom_components/pentair_easytouch/manifest.json"
+          version = os.environ["VERSION"]
+          with open(path) as f:
+              data = json.load(f)
+          data["version"] = version
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          PY
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Create zip
+        run: |
+          cd custom_components/pentair_easytouch
+          zip -r ../../pentair_easytouch.zip .
+
+      - name: Create GitHub release with asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pentair_easytouch.zip
+          generate_release_notes: true

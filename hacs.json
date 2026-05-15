@@ -2,5 +2,6 @@
   "name": "Pentair EasyTouch",
   "homeassistant": "2024.1.0",
   "render_readme": true,
-  "iot_class": "local_push"
+  "zip_release": true,
+  "filename": "pentair_easytouch.zip"
 }
