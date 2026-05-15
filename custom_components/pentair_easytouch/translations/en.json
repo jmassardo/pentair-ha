@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pentair EasyTouch",
+        "description": "Choose how to connect to your Pentair EasyTouch controller.",
+        "data": {
+          "connection_type": "Connection Type"
+        }
+      },
+      "tcp": {
+        "title": "TCP Connection",
+        "description": "Enter the IP address and port of your RS-485 to TCP bridge.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      },
+      "serial": {
+        "title": "Serial Connection",
+        "description": "Enter the serial port path for your RS-485 adapter.",
+        "data": {
+          "serial_port": "Serial Port",
+          "baud_rate": "Baud Rate"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Please check the host and port.",
+      "invalid_serial_port": "Invalid serial port path.",
+      "invalid_baud_rate": "Invalid baud rate."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}

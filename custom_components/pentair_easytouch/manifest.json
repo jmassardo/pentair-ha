@@ -1,0 +1,11 @@
+{
+  "domain": "pentair_easytouch",
+  "name": "Pentair EasyTouch",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/jenna/pentair-ha",
+  "iot_class": "local_push",
+  "requirements": ["pyserial-asyncio>=0.6"],
+  "version": "0.1.0"
+}
