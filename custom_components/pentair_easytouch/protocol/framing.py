@@ -8,6 +8,9 @@ Implements a byte-level state machine that:
 4. Validates the 2-byte big-endian checksum (sum of header + payload).
 5. Emits complete, validated packets via a callback.
 
+Also detects IntelliChlor chlorinator sub-protocol frames ``[16, 2, …, 16, 3]``
+on the same RS485 bus and emits them as ``PentairPacket`` with ``version=0``.
+
 Also provides ``build_packet`` to construct outbound packets.
 """
 
@@ -17,6 +20,11 @@ import enum
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from custom_components.pentair_easytouch.const import (
+    CHLORINATOR_ADDR_START,
+    CONTROLLER_ADDR,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +37,13 @@ _MAX_DATALEN = 75
 _HEADER_LEN = 6
 # Checksum is 2 bytes (big-endian)
 _CHECKSUM_LEN = 2
+
+# Chlorinator sub-protocol constants
+_CHLOR_START_0 = 0x10  # 16
+_CHLOR_START_1 = 0x02  # 2
+_CHLOR_TERM_1 = 0x03  # 3
+_CHLOR_VALID_DESTS: frozenset[int] = frozenset({0, 16, 80, 81, 82, 83})
+_CHLOR_MAX_PAYLOAD_LEN = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,17 +132,44 @@ class PacketFramer:
     # ------------------------------------------------------------------
 
     def _scan_preamble(self) -> bool:
-        """Scan for the preamble ``[255, 0, 255, 165]``.
+        """Scan for a standard preamble or chlorinator frame start.
 
-        Consumes bytes from ``_buf`` until the preamble (including the
-        0xA5 start byte) is found.  Returns True when the preamble is
-        complete and we can begin reading the header.
+        Detects either:
+        - Standard Pentair: ``[255, 0, 255, 165]``
+        - Chlorinator sub-protocol: ``[16, 2, <valid_dest>, ...]``
+
+        Consumes bytes from ``_buf`` until a valid frame start is found.
+        Returns True when we can begin reading a frame.
         """
         # The preamble sequence we look for: 0xFF, 0x00, 0xFF, 0xA5
         preamble_seq = (0xFF, 0x00, 0xFF, 0xA5)
 
         while self._buf:
             byte = self._buf[0]
+
+            # --- Check for chlorinator frame start [16, 2] ---
+            if self._preamble_idx == 0 and byte == _CHLOR_START_0:
+                # Might be start of a chlorinator frame; check next byte
+                if len(self._buf) >= 2 and self._buf[1] == _CHLOR_START_1:
+                    # Validate dest byte if available
+                    if len(self._buf) >= 3:
+                        dest_byte = self._buf[2]
+                        if dest_byte in _CHLOR_VALID_DESTS:
+                            # Attempt to parse the full chlorinator frame
+                            return self._try_parse_chlorinator_frame()
+                        else:
+                            # Invalid dest — not a chlorinator frame
+                            del self._buf[0]
+                            continue
+                    else:
+                        # Need more data to check dest
+                        return False
+                elif len(self._buf) < 2:
+                    # Need more data to check second byte
+                    return False
+                # else: second byte is not 0x02, fall through to preamble logic
+
+            # --- Standard preamble detection ---
             expected = preamble_seq[self._preamble_idx]
 
             if byte == expected:
@@ -156,6 +198,93 @@ class PacketFramer:
                     del self._buf[0]
 
         return False
+
+    def _try_parse_chlorinator_frame(self) -> bool:
+        """Attempt to parse a complete chlorinator sub-protocol frame.
+
+        Expected format: ``[16, 2, dest, action, ...payload..., checksum, 16, 3]``
+
+        Returns True if a complete valid frame was parsed and emitted,
+        or if the frame was determined to be invalid (consumed and discarded).
+        Returns False if more data is needed.
+        """
+        # We know buf starts with [16, 2, valid_dest]
+        # Minimum frame: [16, 2, dest, action, checksum, 16, 3] = 7 bytes
+        if len(self._buf) < 7:
+            return False
+
+        dest = self._buf[2]
+        action = self._buf[3]
+
+        # Scan for terminator [16, 3] starting after action byte
+        # The byte immediately before [16, 3] is the checksum
+        # So we look for pattern: [..., checksum_byte, 16, 3]
+        # Starting search at index 4 (first possible payload/checksum byte)
+        term_idx = None
+        # Max frame length: 4 (header) + max_payload + 1 (checksum) + 2 (terminator)
+        max_scan = min(len(self._buf), 4 + _CHLOR_MAX_PAYLOAD_LEN + 1 + 2)
+
+        for i in range(4, max_scan - 1):
+            if self._buf[i] == _CHLOR_START_0 and self._buf[i + 1] == _CHLOR_TERM_1:
+                term_idx = i
+                break
+
+        if term_idx is None:
+            # Check if we've scanned too far without finding terminator
+            if len(self._buf) >= 4 + _CHLOR_MAX_PAYLOAD_LEN + 1 + 2:
+                # Frame too long — discard the [16, 2] and move on
+                _LOGGER.debug("Chlorinator frame too long — discarding start bytes")
+                del self._buf[:2]
+                return True  # Continue scanning
+            # Need more data
+            return False
+
+        # term_idx points to the 16 in [checksum, 16, 3]
+        # The checksum byte is at term_idx - 1
+        checksum_idx = term_idx - 1
+        if checksum_idx < 4:
+            # No room for even an empty payload checksum position
+            # Malformed — discard
+            _LOGGER.debug("Chlorinator frame malformed — no checksum byte")
+            del self._buf[:2]
+            return True
+
+        # Extract payload (between action and checksum)
+        payload = bytes(self._buf[4:checksum_idx])
+        received_checksum = self._buf[checksum_idx]
+
+        # Validate checksum: sum of all bytes from first 16 through payload
+        computed_checksum = (_CHLOR_START_0 + _CHLOR_START_1 + dest + action + sum(payload)) % 256
+
+        if received_checksum != computed_checksum:
+            _LOGGER.debug(
+                "Chlorinator checksum mismatch: received=%d, computed=%d — dropping",
+                received_checksum,
+                computed_checksum,
+            )
+            # Discard the start bytes and continue scanning
+            del self._buf[:2]
+            return True
+
+        # Valid chlorinator frame! Consume all bytes through terminator
+        frame_end = term_idx + 2  # past the [16, 3]
+        del self._buf[:frame_end]
+
+        # Determine source based on dest
+        source = CONTROLLER_ADDR if 80 <= dest <= 83 else CHLORINATOR_ADDR_START
+
+        packet = PentairPacket(
+            version=0,
+            dest=dest,
+            source=source,
+            action=action,
+            payload=payload,
+        )
+
+        if self._on_packet:
+            self._on_packet(packet)
+
+        return True
 
     def _read_header(self) -> bool:
         """Read the 5 remaining header bytes (165 already consumed).

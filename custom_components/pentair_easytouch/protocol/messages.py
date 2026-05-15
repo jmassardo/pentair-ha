@@ -16,6 +16,8 @@ from custom_components.pentair_easytouch.const import (
     ACTION_INTELLIBRITE,
     ACTION_INTELLICHLOR,
     ACTION_STATUS,
+    CHLORINATOR_ADDR_END,
+    CHLORINATOR_ADDR_START,
     PUMP_ACTION_SET_SPEED,
     PUMP_ACTION_STATUS,
     PUMP_ACTION_VSF_1,
@@ -25,6 +27,7 @@ from custom_components.pentair_easytouch.const import (
 )
 from custom_components.pentair_easytouch.model import PoolState
 from custom_components.pentair_easytouch.protocol.chlorinator import (
+    decode_chlorinator_action,
     decode_chlorinator_broadcast,
 )
 from custom_components.pentair_easytouch.protocol.pump import decode_pump_status
@@ -104,6 +107,24 @@ class MessageRouter:
         dest = packet.dest
         payload = packet.payload
 
+        # ---- Chlorinator sub-protocol (version=0) ----
+        if packet.version == 0 and self._is_chlorinator_packet(packet):
+            try:
+                decode_chlorinator_action(
+                    action=action,
+                    payload=payload,
+                    dest=dest,
+                    state=self._state,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Error decoding chlorinator sub-protocol (action=%d, dst=%d)",
+                    action,
+                    dest,
+                )
+            self._notify()
+            return
+
         # ---- Pump protocol (source or dest in 96-111) ----
         if PUMP_ADDR_START <= source <= PUMP_ADDR_END or (PUMP_ADDR_START <= dest <= PUMP_ADDR_END):
             pump_actions = {
@@ -159,3 +180,17 @@ class MessageRouter:
                 self._on_state_updated()
             except Exception:
                 _LOGGER.exception("Error in on_state_updated callback")
+
+    def _is_chlorinator_packet(self, packet: PentairPacket) -> bool:
+        """Determine if a version=0 packet is a chlorinator sub-protocol frame.
+
+        Returns True if the packet destination or source matches chlorinator
+        addressing conventions.
+        """
+        dest = packet.dest
+        source = packet.source
+        # Chlorinator responses have dest=0 or dest=16 with source=80
+        # OCP commands have dest=80-83 with source=16
+        if CHLORINATOR_ADDR_START <= dest <= CHLORINATOR_ADDR_END:
+            return True
+        return dest in (0, 16) and source == CHLORINATOR_ADDR_START
