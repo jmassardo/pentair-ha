@@ -395,7 +395,11 @@ class PentairChlorOutputSensor(PentairSensorBase):
     def native_value(self) -> int | None:
         """Return the current output percentage."""
         chlor = self._find_chlorinator()
-        return chlor.current_output if chlor else None
+        if chlor is None:
+            return None
+        # current_output is derived from target_output on Action 18 receipt.
+        # Fall back to target_output directly if Action 18 hasn't arrived yet.
+        return chlor.current_output or chlor.target_output
 
 
 class PentairSystemStatusSensor(PentairSensorBase):

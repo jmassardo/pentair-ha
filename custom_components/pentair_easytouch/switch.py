@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .model import Circuit, Feature
+    from .model import Chlorinator, Circuit, Feature
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +51,12 @@ async def async_setup_entry(
             if uid not in known_ids:
                 known_ids.add(uid)
                 new_entities.append(PentairFeatureSwitch(coordinator, feature.id))
+
+        for chlor in coordinator.data.chlorinators:
+            uid = f"chlor_{chlor.id}_super"
+            if uid not in known_ids and chlor.is_active:
+                known_ids.add(uid)
+                new_entities.append(PentairSuperChlorinateSwitch(coordinator, chlor.id))
 
         if new_entities:
             async_add_entities(new_entities)
@@ -176,3 +182,79 @@ class PentairFeatureSwitch(CoordinatorEntity[PentairCoordinator], SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the feature off."""
         await self.coordinator.command_manager.set_circuit_state(self._feature_id, False)
+
+
+class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], SwitchEntity):
+    """Switch entity to activate/deactivate super chlorination."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:flash-alert"
+
+    _SUPER_CHLOR_DEFAULT_HOURS = 8
+
+    def __init__(self, coordinator: PentairCoordinator, chlor_id: int) -> None:
+        """Initialize the super chlorinate switch."""
+        super().__init__(coordinator)
+        self._chlor_id = chlor_id
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_chlorinator_{chlor_id}_super_chlor"
+        )
+
+    def _find_chlorinator(self) -> Chlorinator | None:
+        """Find this chlorinator in the coordinator data."""
+        if self.coordinator.data is None:
+            return None
+        for chlor in self.coordinator.data.chlorinators:
+            if chlor.id == self._chlor_id:
+                return chlor
+        return None
+
+    @property
+    def name(self) -> str:
+        """Return the name."""
+        chlor = self._find_chlorinator()
+        chlor_name = chlor.name if chlor and chlor.name else "Chlorinator"
+        return f"{chlor_name} Super Chlorinate"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if super chlorination is active."""
+        chlor = self._find_chlorinator()
+        return chlor.super_chlor if chlor else False
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return super().available and self.coordinator.data is not None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information about the Pentair controller."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            name="Pentair EasyTouch",
+            manufacturer="Pentair",
+            model="EasyTouch",
+        )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Activate super chlorination."""
+        chlor = self._find_chlorinator()
+        if chlor is None:
+            return
+        await self.coordinator.command_manager.set_chlorinator(
+            pool_pct=chlor.pool_setpoint,
+            spa_pct=chlor.spa_setpoint,
+            super_chlor_hours=self._SUPER_CHLOR_DEFAULT_HOURS,
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Deactivate super chlorination."""
+        chlor = self._find_chlorinator()
+        if chlor is None:
+            return
+        await self.coordinator.command_manager.set_chlorinator(
+            pool_pct=chlor.pool_setpoint,
+            spa_pct=chlor.spa_setpoint,
+            super_chlor_hours=0,
+        )

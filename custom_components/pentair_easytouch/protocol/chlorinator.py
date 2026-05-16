@@ -24,23 +24,16 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def decode_chlorinator_broadcast(payload: bytes, state: PoolState) -> None:
-    """Decode an Action 25 IntelliChlor broadcast message.
+    """Decode an Action 25 IntelliChlor broadcast message (EasyTouch).
 
-    The OCP periodically broadcasts chlorinator configuration:
-    - Pool setpoint
-    - Spa setpoint
-    - Super chlorinate flag
-    - Status
-
-    The exact byte layout varies, but the common approach is:
-    [0] installed (0/1)
-    [1] pool setpoint %
-    [2] spa setpoint %
-    [3] super chlor hours
-    [4] status
-
-    NOTE: Salt level is typically NOT in this broadcast — it comes from
-    the chlorinator sub-protocol action 18 response.
+    Byte layout (from nodejs-poolController processTouch):
+    [0] = (spaSetpoint << 1) | activeFlag  → spa_setpoint = byte >> 1
+    [1] = poolSetpoint
+    [2] = ? (flags/reserved, often 0x80)
+    [3] = salt / 50
+    [4] = status (bit 7 = generating flag, bits 0-6 = status code)
+    [5] = super chlor hours (0 = not super-chlorinating)
+    [6..21] = chlorinator name (ASCII, padded with spaces/nulls)
     """
     _LOGGER.debug(
         "CHLOR Action 25 raw payload (%d bytes): [%s]",
@@ -56,22 +49,32 @@ def decode_chlorinator_broadcast(payload: bytes, state: PoolState) -> None:
         return
 
     chlor = state.get_chlorinator(1)
-    chlor.is_active = True
+    chlor.is_active = (payload[0] & 0x01) == 1
 
-    if len(payload) > 1:
-        chlor.pool_setpoint = payload[1]
-    if len(payload) > 2:
-        chlor.spa_setpoint = payload[2]
+    # Spa setpoint is encoded in bits 1-7 of byte 0
+    chlor.spa_setpoint = payload[0] >> 1
+    # Pool setpoint is byte 1
+    chlor.pool_setpoint = payload[1]
+
     if len(payload) > 3:
-        chlor.super_chlor_hours = payload[3]
-        chlor.super_chlor = payload[3] > 0
+        salt = payload[3] * 50
+        if salt > 0:
+            chlor.salt_level = salt
     if len(payload) > 4:
         chlor.status = payload[4] & 0x7F
+    if len(payload) > 5:
+        chlor.super_chlor_hours = payload[5]
+        chlor.super_chlor = payload[5] > 0
+    if len(payload) > 6:
+        name = bytes(payload[6:22]).decode("ascii", errors="replace").rstrip("\x00 ")
+        if name and not chlor.name:
+            chlor.name = name
 
     _LOGGER.debug(
-        "CHLOR Action 25 decoded: pool_sp=%d%% spa_sp=%d%% super_hours=%d status=%d",
+        "CHLOR Action 25 decoded: pool_sp=%d%% spa_sp=%d%% salt=%d super_hours=%d status=%d",
         chlor.pool_setpoint,
         chlor.spa_setpoint,
+        chlor.salt_level,
         chlor.super_chlor_hours,
         chlor.status,
     )
@@ -121,8 +124,19 @@ def decode_chlorinator_action(
 
     elif action == 17:
         # OCP → Chlorinator: set output percentage
+        # This is the live command the OCP sends, representing the active
+        # body's setpoint.  We use it to derive pool/spa setpoints based on
+        # which body is currently running.
         if len(payload) > 0:
             chlor.target_output = payload[0]
+            # Derive the active body's setpoint from the target output
+            spa_on = any(
+                c.id == 1 and c.is_on for c in state.circuits
+            )
+            if spa_on:
+                chlor.spa_setpoint = payload[0]
+            else:
+                chlor.pool_setpoint = payload[0]
 
     elif action == 18:
         # Chlorinator → OCP: salt level + status response
@@ -132,6 +146,9 @@ def decode_chlorinator_action(
                 chlor.salt_level = salt
         if len(payload) > 1:
             chlor.status = payload[1] & 0x7F
+        # Per reference: currentOutput = targetOutput when chlorinator responds.
+        # The chlorinator doesn't report its own output; we derive from Action 17.
+        chlor.current_output = chlor.target_output
         # When chlorinator responds, we know it's active and communicating
         chlor.is_active = True
 

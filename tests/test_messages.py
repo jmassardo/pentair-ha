@@ -117,7 +117,9 @@ class TestMessageRouter:
         state = PoolState()
         router = MessageRouter(state)
 
-        payload = bytes([1, 60, 20, 0, 0])
+        # byte[0] = (spa_setpoint << 1) | active = (20 << 1) | 1 = 41
+        # byte[1] = pool_setpoint = 60
+        payload = bytes([41, 60, 0, 0, 0, 0])
         pkt = _make_packet(action=25, payload=payload)
         router.dispatch(pkt)
 

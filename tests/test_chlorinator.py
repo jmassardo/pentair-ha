@@ -12,7 +12,9 @@ class TestDecodeChlorinatorBroadcast:
 
     def test_basic_decode(self) -> None:
         state = PoolState()
-        payload = bytes([1, 50, 30, 0, 0])  # installed, pool=50%, spa=30%
+        # byte[0] = (spa_setpoint << 1) | active_flag = (30 << 1) | 1 = 61
+        # byte[1] = pool_setpoint = 50
+        payload = bytes([61, 50, 0, 0, 0, 0])
         decode_chlorinator_broadcast(payload, state)
 
         chlor = state.get_chlorinator(1)
@@ -23,7 +25,8 @@ class TestDecodeChlorinatorBroadcast:
 
     def test_super_chlor(self) -> None:
         state = PoolState()
-        payload = bytes([1, 50, 30, 8, 0])  # super_chlor = 8 hours
+        # byte[0] = (30 << 1) | 1 = 61, byte[1] = 50, byte[5] = 8 (hours)
+        payload = bytes([61, 50, 0, 0, 0, 8])
         decode_chlorinator_broadcast(payload, state)
 
         chlor = state.get_chlorinator(1)
@@ -32,7 +35,8 @@ class TestDecodeChlorinatorBroadcast:
 
     def test_status(self) -> None:
         state = PoolState()
-        payload = bytes([1, 50, 30, 0, 0x82])  # status with high bit masked
+        # byte[4] = status = 0x82, high bit stripped → 0x02
+        payload = bytes([61, 50, 0, 0, 0x82, 0])
         decode_chlorinator_broadcast(payload, state)
 
         chlor = state.get_chlorinator(1)
