@@ -7,10 +7,10 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PORT
 
-from .const import DEFAULT_TCP_PORT, DOMAIN
+from .const import CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS, DEFAULT_TCP_PORT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +53,11 @@ class PentairEasyTouchConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._connection_type: str = CONNECTION_TCP
+
+    @staticmethod
+    def async_get_options_flow(config_entry):  # noqa: ANN001, ANN205
+        """Return the options flow handler."""
+        return PentairOptionsFlowHandler(config_entry)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step: choose connection type."""
@@ -145,3 +150,31 @@ class PentairEasyTouchConfigFlow(ConfigFlow, domain=DOMAIN):
         if baud_rate <= 0:
             return "invalid_baud_rate"
         return None
+
+
+class PentairOptionsFlowHandler(OptionsFlow):
+    """Handle options for Pentair EasyTouch."""
+
+    def __init__(self, config_entry) -> None:  # noqa: ANN001
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current_hours = self.config_entry.options.get(
+            CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SUPER_CHLOR_HOURS, default=current_hours): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=72)
+                    ),
+                }
+            ),
+        )

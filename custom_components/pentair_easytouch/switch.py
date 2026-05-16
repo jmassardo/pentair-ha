@@ -10,7 +10,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS, DOMAIN
 from .coordinator import PentairCoordinator
 
 if TYPE_CHECKING:
@@ -190,14 +190,19 @@ class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], Switch
     _attr_has_entity_name = True
     _attr_icon = "mdi:flash-alert"
 
-    _SUPER_CHLOR_DEFAULT_HOURS = 8
-
     def __init__(self, coordinator: PentairCoordinator, chlor_id: int) -> None:
         """Initialize the super chlorinate switch."""
         super().__init__(coordinator)
         self._chlor_id = chlor_id
         self._attr_unique_id = (
             f"{coordinator.config_entry.entry_id}_chlorinator_{chlor_id}_super_chlor"
+        )
+
+    @property
+    def _super_chlor_hours(self) -> int:
+        """Return configured super chlorinate duration from options."""
+        return self.coordinator.config_entry.options.get(
+            CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS
         )
 
     def _find_chlorinator(self) -> Chlorinator | None:
@@ -245,7 +250,7 @@ class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], Switch
         await self.coordinator.command_manager.set_chlorinator(
             pool_pct=chlor.pool_setpoint,
             spa_pct=chlor.spa_setpoint,
-            super_chlor_hours=self._SUPER_CHLOR_DEFAULT_HOURS,
+            super_chlor_hours=self._super_chlor_hours,
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:

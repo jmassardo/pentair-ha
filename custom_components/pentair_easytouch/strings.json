@@ -33,5 +33,15 @@
     "abort": {
       "already_configured": "This device is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pentair EasyTouch Options",
+        "data": {
+          "super_chlor_hours": "Super Chlorinate Duration (hours)"
+        }
+      }
+    }
   }
 }
