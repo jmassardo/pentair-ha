@@ -6,8 +6,12 @@ import pytest
 
 from custom_components.pentair_easytouch.const import DOMAIN
 from custom_components.pentair_easytouch.coordinator import PentairCoordinator
-from custom_components.pentair_easytouch.model import Chlorinator, PoolState
-from custom_components.pentair_easytouch.number import PentairChlorSetpointNumber, async_setup_entry
+from custom_components.pentair_easytouch.model import Chlorinator, PoolState, Pump
+from custom_components.pentair_easytouch.number import (
+    PentairChlorSetpointNumber,
+    PentairPumpSpeedNumber,
+    async_setup_entry,
+)
 
 
 def _make_coordinator(state: PoolState | None = None) -> MagicMock:
@@ -21,6 +25,7 @@ def _make_coordinator(state: PoolState | None = None) -> MagicMock:
     coordinator.command_manager.set_heat_setpoint = AsyncMock()
     coordinator.command_manager.set_light_theme = AsyncMock()
     coordinator.command_manager.set_chlorinator = AsyncMock()
+    coordinator.command_manager.set_pump_speed = AsyncMock()
     coordinator.last_update_success = True
     return coordinator
 
@@ -142,4 +147,117 @@ async def test_number_dynamic_discovery_adds_new_chlorinators() -> None:
     # Call again - should not add duplicates
     async_add_entities.reset_mock()
     discover_cb()
+    async_add_entities.assert_not_called()
+
+
+# --- Pump Speed Number Tests ---
+
+
+def _make_state_with_pump() -> PoolState:
+    state = PoolState()
+    state.pumps = [Pump(id=1, name="IntelliFlo VS", address=96, is_active=True, rpm=2400, watts=150)]
+    return state
+
+
+def test_pump_speed_number_properties() -> None:
+    state = _make_state_with_pump()
+    coordinator = _make_coordinator(state)
+
+    entity = PentairPumpSpeedNumber(coordinator, pump_id=1)
+
+    assert entity.name == "IntelliFlo VS Speed"
+    assert entity.native_value == 2400.0
+    assert entity.available is True
+    assert entity.native_min_value == 0
+    assert entity.native_max_value == 3450
+    assert entity.native_step == 50
+    assert entity.native_unit_of_measurement == "RPM"
+
+
+def test_pump_speed_number_fallback_name() -> None:
+    state = PoolState()
+    state.pumps = [Pump(id=2, name="", address=97, is_active=True, rpm=1200)]
+    coordinator = _make_coordinator(state)
+
+    entity = PentairPumpSpeedNumber(coordinator, pump_id=2)
+    assert entity.name == "Pump 2 Speed"
+
+
+def test_pump_speed_number_unavailable_when_data_none() -> None:
+    coordinator = _make_coordinator(None)
+    entity = PentairPumpSpeedNumber(coordinator, pump_id=1)
+
+    assert entity.native_value is None
+    assert entity.available is False
+
+
+@pytest.mark.asyncio
+async def test_pump_speed_set_calls_command_manager() -> None:
+    state = _make_state_with_pump()
+    coordinator = _make_coordinator(state)
+    entity = PentairPumpSpeedNumber(coordinator, pump_id=1)
+
+    await entity.async_set_native_value(3000.0)
+
+    coordinator.command_manager.set_pump_speed.assert_awaited_once_with(
+        pump_address=96, speed_rpm=3000
+    )
+
+
+@pytest.mark.asyncio
+async def test_pump_speed_set_uses_default_address_when_zero() -> None:
+    state = PoolState()
+    state.pumps = [Pump(id=2, name="Pump 2", address=0, is_active=True, rpm=1200)]
+    coordinator = _make_coordinator(state)
+    entity = PentairPumpSpeedNumber(coordinator, pump_id=2)
+
+    await entity.async_set_native_value(1500.0)
+
+    # Default address = 95 + pump_id = 97
+    coordinator.command_manager.set_pump_speed.assert_awaited_once_with(
+        pump_address=97, speed_rpm=1500
+    )
+
+
+@pytest.mark.asyncio
+async def test_pump_speed_set_noops_when_pump_missing() -> None:
+    coordinator = _make_coordinator(PoolState())
+    entity = PentairPumpSpeedNumber(coordinator, pump_id=1)
+
+    await entity.async_set_native_value(2000.0)
+
+    coordinator.command_manager.set_pump_speed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_setup_discovers_pump_speed_entities() -> None:
+    state = _make_state_with_pump()
+    state.chlorinators = [Chlorinator(id=1, name="IC40", pool_setpoint=40, spa_setpoint=10)]
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    entities = async_add_entities.call_args.args[0]
+    names = [e.name for e in entities]
+    assert "IC40 Pool Setpoint" in names
+    assert "IC40 Spa Setpoint" in names
+    assert "IntelliFlo VS Speed" in names
+    assert len(entities) == 3
+
+
+@pytest.mark.asyncio
+async def test_inactive_pump_not_discovered() -> None:
+    state = PoolState()
+    state.pumps = [Pump(id=1, name="Pump", address=96, is_active=False, rpm=0)]
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    # No entities should be added since pump is inactive
     async_add_entities.assert_not_called()

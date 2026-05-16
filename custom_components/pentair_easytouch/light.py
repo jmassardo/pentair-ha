@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# Themes that are user-selectable effects (exclude control commands)
+# Themes that are user-selectable effects
 _SELECTABLE_THEMES: list[LightTheme] = [
     LightTheme.COLOR_SYNC,
     LightTheme.COLOR_SWIM,
@@ -44,6 +44,8 @@ _SELECTABLE_THEMES: list[LightTheme] = [
     LightTheme.WHITE,
     LightTheme.MAGENTA,
     LightTheme.THUMPER,
+    LightTheme.SAVE,
+    LightTheme.RECALL,
 ]
 
 _THEME_NAME_TO_VALUE: dict[str, int] = {
