@@ -168,11 +168,16 @@ async def test_wait_for_first_update_concurrent_set() -> None:
 async def test_timeout_fallback_when_config_never_arrives(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """If config never arrives but status did, fallback activates ON circuits."""
+    """If config never arrives but status did, fallback activates all circuits in range."""
     coordinator = _make_coordinator_mock()
 
-    # Only status, never config — circuit is ON
-    coordinator._state.circuits = [Circuit(id=1, is_on=True)]
+    # Only status, never config — simulate circuits created by status decode
+    coordinator._state.circuits = [
+        Circuit(id=1, is_on=True),
+        Circuit(id=6, is_on=False),
+        Circuit(id=11, is_on=False),
+        Circuit(id=15, is_on=True),
+    ]
     coordinator._on_state_updated()
 
     assert coordinator._status_received is True
@@ -182,9 +187,11 @@ async def test_timeout_fallback_when_config_never_arrives(
         await coordinator.wait_for_first_update(timeout=0.05)
 
     assert "Timed out waiting for first status broadcast" in caplog.text
-    # Fallback promotes ON circuits and fires the event
+    # Fallback activates ALL circuits in range 1-20, not just ON ones
     assert coordinator._first_update_event.is_set()
-    assert coordinator._state.circuits[0].is_active is True
+    for circuit in coordinator._state.circuits:
+        assert circuit.is_active is True
+        assert circuit.name != ""
 
 
 @pytest.mark.asyncio

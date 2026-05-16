@@ -136,14 +136,22 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
                 timeout,
             )
             # Fallback: if config never arrived (e.g. read-only RS485 adapter),
-            # promote circuits that are ON so entities appear with generic names.
+            # activate all circuits in the valid range so entities appear.
+            # On EasyTouch: circuits 1-10, features 11-18/20.
+            # Without config we can't distinguish which are truly configured,
+            # so we activate them all — unused ones will just show as OFF.
             if not self._config_received and self._status_received:
                 _LOGGER.info(
-                    "No circuit config received; activating ON circuits as fallback"
+                    "No circuit config received; activating all circuits "
+                    "%d-%d as fallback",
+                    _CONFIG_CIRCUIT_MIN,
+                    _CONFIG_CIRCUIT_MAX,
                 )
                 for circuit in self._state.circuits:
-                    if circuit.is_on:
+                    if _CONFIG_CIRCUIT_MIN <= circuit.id <= _CONFIG_CIRCUIT_MAX:
                         circuit.is_active = True
+                        if not circuit.name:
+                            circuit.name = f"Circuit {circuit.id}"
                 self._first_update_event.set()
                 self.async_set_updated_data(self._state)
     # ------------------------------------------------------------------
