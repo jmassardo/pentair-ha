@@ -254,3 +254,36 @@ class TestEndToEndFramingToRouter:
         assert state.time.hours == 20  # Overwritten by action 5
         assert state.time.minutes == 45
         assert state.time.date == 25
+
+
+class TestVersionByteLearning:
+    """Verify the router learns the controller's version byte."""
+
+    def test_learns_version_from_controller_broadcast(self) -> None:
+        state = PoolState()
+        router = MessageRouter(state)
+        assert state.controller_version_byte == 0
+
+        payload = _make_status_payload_29()
+        pkt = _make_packet(action=2, payload=payload, source=16, version=13)
+        router.dispatch(pkt)
+
+        assert state.controller_version_byte == 13
+
+    def test_ignores_chlorinator_version_zero(self) -> None:
+        state = PoolState()
+        router = MessageRouter(state)
+
+        pkt = _make_packet(action=0, payload=bytes(4), source=16, version=0)
+        router.dispatch(pkt)
+
+        assert state.controller_version_byte == 0
+
+    def test_ignores_non_controller_sources(self) -> None:
+        state = PoolState()
+        router = MessageRouter(state)
+
+        pkt = _make_packet(action=2, payload=_make_status_payload_29(), source=33, version=13)
+        router.dispatch(pkt)
+
+        assert state.controller_version_byte == 0

@@ -16,6 +16,7 @@ from custom_components.pentair_easytouch.const import (
     PUMP_ACTION_SET_SPEED,
     REMOTE_ADDR,
 )
+from custom_components.pentair_easytouch.model import PoolState
 from custom_components.pentair_easytouch.protocol.commands import CommandManager
 from custom_components.pentair_easytouch.protocol.framing import PacketFramer, PentairPacket
 from custom_components.pentair_easytouch.protocol.transport import BaseTransport
@@ -67,7 +68,10 @@ def transport() -> FakeTransport:
 
 @pytest.fixture()
 def cmd(transport: FakeTransport) -> CommandManager:
-    return CommandManager(transport)
+    mgr = CommandManager(transport)
+    # Eliminate retry delays in tests
+    mgr._RETRY_DELAY = 0.0  # noqa: SLF001
+    return mgr
 
 
 # ---------------------------------------------------------------------------
@@ -523,18 +527,21 @@ class TestTransportInteraction:
         self, transport: FakeTransport, cmd: CommandManager
     ) -> None:
         await cmd.set_circuit_state(6, True)
-        assert len(transport.written) == 1
+        # 1 initial + 2 retries = 3 writes
+        assert len(transport.written) == 3
 
     async def test_multiple_commands(self, transport: FakeTransport, cmd: CommandManager) -> None:
         await cmd.set_circuit_state(6, True)
         await cmd.set_circuit_state(7, False)
         await cmd.cancel_delay()
-        assert len(transport.written) == 3
+        # 3 commands × 3 writes each = 9
+        assert len(transport.written) == 9
 
     async def test_disconnected_transport_raises(self) -> None:
         transport = FakeTransport()
         transport._connected = False
         cmd = CommandManager(transport)
+        cmd._RETRY_DELAY = 0.0  # noqa: SLF001
         with pytest.raises(ConnectionError):
             await cmd.set_circuit_state(6, True)
 
@@ -643,3 +650,83 @@ class TestProtocolVersionByte:
         await cmd.set_pump_speed(96, 2000)
         pkt = _parse_last_packet(transport)
         assert pkt.version == 0
+
+
+# ---------------------------------------------------------------------------
+# Version byte learning
+# ---------------------------------------------------------------------------
+
+
+class TestVersionByteLearning:
+    """Verify CommandManager uses the learned controller version byte."""
+
+    async def test_default_version_byte_without_state(
+        self, transport: FakeTransport
+    ) -> None:
+        """Without state, defaults to version 33."""
+        cmd = CommandManager(transport)
+        cmd._RETRY_DELAY = 0.0  # noqa: SLF001
+        await cmd.set_circuit_state(6, True)
+        pkt = _parse_last_packet(transport)
+        assert pkt.version == 33
+
+    async def test_uses_learned_version_byte(
+        self, transport: FakeTransport
+    ) -> None:
+        """When state has a learned version byte, commands use it."""
+        state = PoolState()
+        state.controller_version_byte = 13
+        cmd = CommandManager(transport, state=state)
+        cmd._RETRY_DELAY = 0.0  # noqa: SLF001
+        await cmd.set_circuit_state(6, True)
+        pkt = _parse_last_packet(transport)
+        assert pkt.version == 13
+
+    async def test_falls_back_to_33_when_version_is_zero(
+        self, transport: FakeTransport
+    ) -> None:
+        """Version 0 in state means not yet learned; defaults to 33."""
+        state = PoolState()
+        state.controller_version_byte = 0
+        cmd = CommandManager(transport, state=state)
+        cmd._RETRY_DELAY = 0.0  # noqa: SLF001
+        await cmd.set_circuit_state(6, True)
+        pkt = _parse_last_packet(transport)
+        assert pkt.version == 33
+
+    async def test_pump_commands_ignore_learned_version(
+        self, transport: FakeTransport
+    ) -> None:
+        """Pump commands always use version=0 regardless of learned byte."""
+        state = PoolState()
+        state.controller_version_byte = 13
+        cmd = CommandManager(transport, state=state)
+        cmd._RETRY_DELAY = 0.0  # noqa: SLF001
+        await cmd.set_pump_speed(96, 2000)
+        pkt = _parse_last_packet(transport)
+        assert pkt.version == 0
+
+
+# ---------------------------------------------------------------------------
+# Retry behaviour
+# ---------------------------------------------------------------------------
+
+
+class TestRetryBehaviour:
+    """Verify commands are retried."""
+
+    async def test_command_sends_three_times(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """Each command is sent 1 + 2 retries = 3 times."""
+        await cmd.set_circuit_state(6, True)
+        assert len(transport.written) == 3
+        # All three should be identical packets
+        assert transport.written[0] == transport.written[1] == transport.written[2]
+
+    async def test_config_request_no_retries(
+        self, transport: FakeTransport, cmd: CommandManager
+    ) -> None:
+        """Config requests are sent only once (no retries)."""
+        await cmd.request_config(ACTION_GET_CIRCUITS, 1)
+        assert len(transport.written) == 1

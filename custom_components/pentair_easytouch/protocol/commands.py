@@ -9,6 +9,7 @@ Commands are fire-and-forget: no response matching is performed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,7 @@ _MIN_ITEM_ID = 0
 _MAX_ITEM_ID = 255
 
 if TYPE_CHECKING:
+    from custom_components.pentair_easytouch.model import PoolState
     from custom_components.pentair_easytouch.protocol.transport import BaseTransport
 
 _LOGGER = logging.getLogger(__name__)
@@ -100,22 +102,42 @@ class CommandManager:
         self,
         transport: BaseTransport,
         source_addr: int = REMOTE_ADDR,
+        state: PoolState | None = None,
     ) -> None:
         self._transport = transport
         self._source_addr = source_addr
+        self._state = state
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _get_controller_version(self) -> int:
+        """Return the version byte learned from the controller, or 33 as default."""
+        if self._state and self._state.controller_version_byte:
+            return self._state.controller_version_byte
+        return 33
+
+    _RETRY_COUNT = 2  # Total of 3 attempts (1 initial + 2 retries)
+    _RETRY_DELAY = 1.0  # seconds between retries
 
     async def _send(
         self,
         action: int,
         payload: list[int],
         dest: int = CONTROLLER_ADDR,
-        version: int = 33,
+        version: int | None = None,
+        retries: int | None = None,
     ) -> None:
-        """Build a packet and write it to the transport."""
+        """Build a packet and write it to the transport.
+
+        Retries up to ``retries`` additional times with a delay between
+        each attempt to handle RS-485 bus collisions.
+        """
+        if version is None:
+            version = self._get_controller_version()
+        if retries is None:
+            retries = self._RETRY_COUNT
         packet = build_packet(
             dest=dest,
             source=self._source_addr,
@@ -123,7 +145,18 @@ class CommandManager:
             payload=payload,
             version=version,
         )
+        _LOGGER.debug(
+            "TX packet: dest=%d action=%d version=%d payload=%s",
+            dest, action, version, list(payload),
+        )
         await self._transport.write(packet)
+        for attempt in range(retries):
+            await asyncio.sleep(self._RETRY_DELAY)
+            _LOGGER.debug(
+                "TX retry %d/%d: action=%d",
+                attempt + 1, retries, action,
+            )
+            await self._transport.write(packet)
 
     # ------------------------------------------------------------------
     # Config requests
@@ -147,7 +180,7 @@ class CommandManager:
         _validate_range(action, _MIN_CONFIG_ACTION, _MAX_CONFIG_ACTION, "action")
         _validate_range(item_id, _MIN_ITEM_ID, _MAX_ITEM_ID, "item_id")
         _LOGGER.debug("CMD request_config action=%d item_id=%d", action, item_id)
-        await self._send(action, [item_id])
+        await self._send(action, [item_id], retries=0)
 
     # ------------------------------------------------------------------
     # Circuit control

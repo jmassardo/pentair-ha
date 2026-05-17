@@ -19,6 +19,7 @@ from custom_components.pentair_easytouch.const import (
     ACTION_STATUS,
     CHLORINATOR_ADDR_END,
     CHLORINATOR_ADDR_START,
+    CONTROLLER_ADDR,
     PUMP_ACTION_SET_SPEED,
     PUMP_ACTION_STATUS,
     PUMP_ACTION_VSF_1,
@@ -112,6 +113,18 @@ class MessageRouter:
         source = packet.source
         dest = packet.dest
         payload = packet.payload
+
+        # Learn the controller's version byte from its broadcasts so we
+        # can mirror it in outbound commands (the controller may reject
+        # packets with a mismatched version byte).
+        if source == CONTROLLER_ADDR and packet.version != 0:
+            if self._state.controller_version_byte != packet.version:
+                _LOGGER.info(
+                    "Learned controller version byte: %d (was %d)",
+                    packet.version,
+                    self._state.controller_version_byte,
+                )
+                self._state.controller_version_byte = packet.version
 
         # ---- Chlorinator sub-protocol (version=0) ----
         if packet.version == 0 and self._is_chlorinator_packet(packet):

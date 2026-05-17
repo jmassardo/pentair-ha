@@ -71,7 +71,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
             state=self._state,
             on_state_updated=self._on_state_updated,
         )
-        self._command_manager = CommandManager(self._transport)
+        self._command_manager = CommandManager(self._transport, state=self._state)
 
         # Wire transport data callback
         self._transport.set_on_data(self._on_data)

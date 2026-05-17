@@ -242,6 +242,7 @@ class PoolState:
     delay: int = 0
     freeze: bool = False
     valve_byte: int = 0
+    controller_version_byte: int = 0  # Learned from controller broadcasts
 
     # ------------------------------------------------------------------
     # Helper accessors
