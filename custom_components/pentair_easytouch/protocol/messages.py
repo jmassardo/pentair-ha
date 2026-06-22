@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from custom_components.pentair_easytouch.const import (
     ACTION_CIRCUIT_NAMES,
+    ACTION_CUSTOM_NAMES,
     ACTION_DATETIME,
     ACTION_HEAT_STATUS,
     ACTION_INTELLIBRITE,
@@ -35,6 +36,9 @@ from custom_components.pentair_easytouch.protocol.chlorinator import (
 from custom_components.pentair_easytouch.protocol.circuit_config import (
     decode_circuit_config,
 )
+from custom_components.pentair_easytouch.protocol.custom_names import (
+    decode_custom_names,
+)
 from custom_components.pentair_easytouch.protocol.pump import decode_pump_status
 from custom_components.pentair_easytouch.protocol.status import (
     decode_datetime,
@@ -57,6 +61,7 @@ _HANDLED_ACTIONS: frozenset[int] = frozenset(
         ACTION_STATUS,
         ACTION_DATETIME,
         ACTION_HEAT_STATUS,
+        ACTION_CUSTOM_NAMES,
         ACTION_CIRCUIT_NAMES,
         ACTION_INTELLIBRITE,
         ACTION_INTELLICHLOR,
@@ -86,6 +91,7 @@ class MessageRouter:
             ACTION_STATUS: decode_status,
             ACTION_DATETIME: decode_datetime,
             ACTION_HEAT_STATUS: decode_heat_status,
+            ACTION_CUSTOM_NAMES: decode_custom_names,
             ACTION_CIRCUIT_NAMES: decode_circuit_config,
             ACTION_INTELLIBRITE: decode_intellibrite,
             ACTION_INTELLICHLOR: decode_chlorinator_broadcast,

@@ -237,6 +237,7 @@ class PoolState:
     heaters: list[Heater] = field(default_factory=list)
     chlorinators: list[Chlorinator] = field(default_factory=list)
     schedules: list[Schedule] = field(default_factory=list)
+    custom_names: dict[int, str] = field(default_factory=dict)
     mode: int = 0  # PanelMode value
     status: int = 0
     delay: int = 0

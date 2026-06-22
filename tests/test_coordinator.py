@@ -8,10 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.pentair_easytouch.const import ACTION_GET_CIRCUITS
+from custom_components.pentair_easytouch.const import ACTION_GET_CIRCUITS, ACTION_GET_CUSTOM_NAMES
 from custom_components.pentair_easytouch.coordinator import (
     _CONFIG_CIRCUIT_MAX,
     _CONFIG_CIRCUIT_MIN,
+    _CUSTOM_NAME_COUNT,
     PentairCoordinator,
 )
 from custom_components.pentair_easytouch.model import Circuit, PoolState
@@ -196,7 +197,7 @@ async def test_timeout_fallback_when_config_never_arrives(
 
 @pytest.mark.asyncio
 async def test_async_request_config_sends_requests() -> None:
-    """_async_request_config sends GET_CIRCUITS for circuits 1-20."""
+    """_async_request_config sends GET_CUSTOM_NAMES then GET_CIRCUITS."""
     coordinator = MagicMock(spec=PentairCoordinator)
     coordinator._command_manager = AsyncMock()
     coordinator._command_manager.request_config = AsyncMock()
@@ -212,15 +213,24 @@ async def test_async_request_config_sends_requests() -> None:
     ):
         await coordinator._async_request_config()
 
-    expected_count = _CONFIG_CIRCUIT_MAX - _CONFIG_CIRCUIT_MIN + 1
-    assert coordinator._command_manager.request_config.call_count == expected_count
+    expected_custom = _CUSTOM_NAME_COUNT
+    expected_circuits = _CONFIG_CIRCUIT_MAX - _CONFIG_CIRCUIT_MIN + 1
+    expected_total = expected_custom + expected_circuits
+    assert coordinator._command_manager.request_config.call_count == expected_total
 
-    # Verify each circuit ID was requested
-    called_ids = [
-        call.args[1] for call in coordinator._command_manager.request_config.call_args_list
-    ]
+    calls = coordinator._command_manager.request_config.call_args_list
+
+    # First phase: custom name requests (slots 0-9)
+    custom_calls = calls[:expected_custom]
+    for i, call in enumerate(custom_calls):
+        assert call.args[0] == ACTION_GET_CUSTOM_NAMES
+        assert call.args[1] == i
+
+    # Second phase: circuit config requests (circuits 1-20)
+    circuit_calls = calls[expected_custom:]
+    called_ids = [call.args[1] for call in circuit_calls]
     assert called_ids == list(range(_CONFIG_CIRCUIT_MIN, _CONFIG_CIRCUIT_MAX + 1))
-    for call in coordinator._command_manager.request_config.call_args_list:
+    for call in circuit_calls:
         assert call.args[0] == ACTION_GET_CIRCUITS
 
 
@@ -249,8 +259,8 @@ async def test_async_request_config_handles_transport_errors() -> None:
     ):
         await coordinator._async_request_config()
 
-    # All 20 requests should have been attempted despite the error on circuit 5
-    expected_count = _CONFIG_CIRCUIT_MAX - _CONFIG_CIRCUIT_MIN + 1
+    # All 30 requests (10 custom names + 20 circuits) should be attempted
+    expected_count = _CUSTOM_NAME_COUNT + (_CONFIG_CIRCUIT_MAX - _CONFIG_CIRCUIT_MIN + 1)
     assert call_count == expected_count
 
 

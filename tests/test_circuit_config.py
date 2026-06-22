@@ -128,8 +128,20 @@ class TestDecodeCircuitConfig:
         assert circuit.is_active is True
         assert circuit.name == "Pool"
 
-    def test_custom_name_id_fallback(self) -> None:
-        """name_id >= 200 (custom names) should fall back to 'Circuit {id}'."""
+    def test_custom_name_id_uses_custom_name(self) -> None:
+        """name_id >= 200 should use a custom name from state if available."""
+        state = PoolState()
+        state.custom_names[1] = "Waterfall"
+        # circuit_id=5, function=GENERIC(0), name_id=201 (custom name slot 1)
+        payload = bytes([5, 0, 201, 0, 0])
+        decode_circuit_config(payload, state)
+
+        circuit = state.get_circuit(5)
+        assert circuit.name == "Waterfall"
+        assert circuit.is_active is True
+
+    def test_custom_name_id_fallback_when_not_loaded(self) -> None:
+        """name_id >= 200 should fall back to 'Circuit {id}' when custom name not yet loaded."""
         state = PoolState()
         # circuit_id=5, function=GENERIC(0), name_id=201 (custom name slot 1)
         payload = bytes([5, 0, 201, 0, 0])

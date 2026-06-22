@@ -59,10 +59,10 @@ def decode_circuit_config(payload: bytes, state: PoolState) -> None:
     # Determine if this circuit is active (configured on the controller)
     is_active = (circuit_type != CircuitFunction.NOT_USED) and (name_id != 0)
 
-    # Resolve the circuit name from the built-in table
-    # name_id >= 200 references custom names (Action 10); fall back to generic
+    # Resolve the circuit name from the built-in table or custom names
     if name_id >= 200:
-        circuit_name = f"Circuit {circuit_id}"
+        custom_index = name_id - 200
+        circuit_name = state.custom_names.get(custom_index, f"Circuit {circuit_id}")
     else:
         circuit_name = CIRCUIT_NAMES.get(name_id, f"Circuit {circuit_id}")
 

@@ -23,7 +23,7 @@ from .config_flow import (
     CONF_SERIAL_PORT,
     CONNECTION_TCP,
 )
-from .const import ACTION_GET_CIRCUITS, DOMAIN
+from .const import ACTION_GET_CIRCUITS, ACTION_GET_CUSTOM_NAMES, DOMAIN
 from .model import PoolState
 from .protocol.commands import CommandManager
 from .protocol.framing import PacketFramer
@@ -44,6 +44,10 @@ _CONFIG_REQUEST_DELAY = 0.05  # 50ms, matching nodejs-poolController
 # Range of circuit IDs to request config for.
 _CONFIG_CIRCUIT_MIN = 1
 _CONFIG_CIRCUIT_MAX = 20
+
+
+# Number of custom name slots on the controller.
+_CUSTOM_NAME_COUNT = 10
 
 
 class PentairCoordinator(DataUpdateCoordinator[PoolState]):
@@ -193,13 +197,35 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
                 self._first_update_event.set()
 
     async def _async_request_config(self) -> None:
-        """Send GET_CIRCUITS requests for circuits 1-20.
+        """Send GET_CUSTOM_NAMES and GET_CIRCUITS requests.
 
-        The controller responds with Action 11 (circuit name/function) for
-        each requested circuit.  A 50ms delay is inserted between requests
-        to avoid flooding the RS485 bus, matching the reference
-        implementation (nodejs-poolController).
+        Custom names (Action 10, slots 0-9) are requested first so that
+        when circuit config (Action 11) arrives, custom name references
+        (name_id >= 200) can be resolved immediately.
+
+        A 50ms delay is inserted between requests to avoid flooding the
+        RS485 bus, matching the reference implementation
+        (nodejs-poolController).
         """
+        # --- Phase 1: request custom names (slots 0-9) ---
+        _LOGGER.debug(
+            "Requesting custom names for slots 0-%d",
+            _CUSTOM_NAME_COUNT - 1,
+        )
+        for name_index in range(_CUSTOM_NAME_COUNT):
+            try:
+                await self._command_manager.request_config(
+                    ACTION_GET_CUSTOM_NAMES, name_index
+                )
+            except Exception:
+                _LOGGER.debug(
+                    "Failed to request custom name %d",
+                    name_index,
+                    exc_info=True,
+                )
+            await asyncio.sleep(_CONFIG_REQUEST_DELAY)
+
+        # --- Phase 2: request circuit configuration (circuits 1-20) ---
         _LOGGER.debug(
             "Requesting circuit config for circuits %d-%d",
             _CONFIG_CIRCUIT_MIN,
