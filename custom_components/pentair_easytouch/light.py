@@ -153,13 +153,13 @@ class PentairLight(CoordinatorEntity[PentairCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally setting an effect."""
+        await self.coordinator.command_manager.set_circuit_state(self._circuit_id, True)
+
         effect = kwargs.get(ATTR_EFFECT)
         if effect is not None:
             theme_value = _THEME_NAME_TO_VALUE.get(effect)
             if theme_value is not None:
                 await self.coordinator.command_manager.set_light_theme(theme_value)
-
-        await self.coordinator.command_manager.set_circuit_state(self._circuit_id, True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""

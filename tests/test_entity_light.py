@@ -85,8 +85,8 @@ async def test_light_turn_on_with_effect() -> None:
 
     await entity.async_turn_on(**{ATTR_EFFECT: "caribbean"})
 
-    coordinator.command_manager.set_light_theme.assert_awaited_once_with(LightTheme.CARIBBEAN.value)
     coordinator.command_manager.set_circuit_state.assert_awaited_once_with(7, True)
+    coordinator.command_manager.set_light_theme.assert_awaited_once_with(LightTheme.CARIBBEAN.value)
 
 
 @pytest.mark.asyncio
