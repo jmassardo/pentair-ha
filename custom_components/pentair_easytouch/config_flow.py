@@ -55,9 +55,9 @@ class PentairEasyTouchConfigFlow(ConfigFlow, domain=DOMAIN):
         self._connection_type: str = CONNECTION_TCP
 
     @staticmethod
-    def async_get_options_flow(config_entry):  # noqa: ANN001, ANN205
+    def async_get_options_flow(config_entry):  # noqa: ANN001, ANN205, ARG004
         """Return the options flow handler."""
-        return PentairOptionsFlowHandler(config_entry)
+        return PentairOptionsFlowHandler()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step: choose connection type."""
@@ -119,6 +119,90 @@ class PentairEasyTouchConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(step_id="serial", data_schema=STEP_SERIAL_SCHEMA, errors=errors)
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration of connection parameters."""
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        assert entry is not None
+        connection_type = entry.data[CONF_CONNECTION_TYPE]
+
+        if connection_type == CONNECTION_TCP:
+            return await self.async_step_reconfigure_tcp()
+        return await self.async_step_reconfigure_serial()
+
+    async def async_step_reconfigure_tcp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration of TCP connection parameters."""
+        errors: dict[str, str] = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        assert entry is not None
+
+        if user_input is not None:
+            host = user_input[CONF_HOST]
+            port = user_input[CONF_PORT]
+
+            error = await self._test_tcp_connection(host, port)
+            if error is not None:
+                errors["base"] = error
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    title=f"Pentair EasyTouch ({host}:{port})",
+                    data={**entry.data, CONF_HOST: host, CONF_PORT: port},
+                )
+
+        current_host = entry.data.get(CONF_HOST, "")
+        current_port = entry.data.get(CONF_PORT, DEFAULT_TCP_PORT)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=current_host): str,
+                vol.Required(CONF_PORT, default=current_port): vol.Coerce(int),
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure_tcp", data_schema=schema, errors=errors
+        )
+
+    async def async_step_reconfigure_serial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration of serial connection parameters."""
+        errors: dict[str, str] = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        assert entry is not None
+
+        if user_input is not None:
+            serial_port = user_input[CONF_SERIAL_PORT]
+            baud_rate = user_input[CONF_BAUD_RATE]
+
+            error = self._validate_serial_input(serial_port, baud_rate)
+            if error is not None:
+                errors["base"] = error
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    title=f"Pentair EasyTouch ({serial_port})",
+                    data={
+                        **entry.data,
+                        CONF_SERIAL_PORT: serial_port,
+                        CONF_BAUD_RATE: baud_rate,
+                    },
+                )
+
+        current_port = entry.data.get(CONF_SERIAL_PORT, "")
+        current_baud = entry.data.get(CONF_BAUD_RATE, 9600)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SERIAL_PORT, default=current_port): str,
+                vol.Required(CONF_BAUD_RATE, default=current_baud): vol.Coerce(int),
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure_serial", data_schema=schema, errors=errors
+        )
+
     @staticmethod
     async def _test_tcp_connection(host: str, port: int) -> str | None:
         """Test that we can open a TCP connection to the host.
@@ -154,10 +238,6 @@ class PentairEasyTouchConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class PentairOptionsFlowHandler(OptionsFlow):
     """Handle options for Pentair EasyTouch."""
-
-    def __init__(self, config_entry) -> None:  # noqa: ANN001
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the options."""

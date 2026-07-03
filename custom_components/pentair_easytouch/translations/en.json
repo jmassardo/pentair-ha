@@ -23,6 +23,22 @@
           "serial_port": "Serial Port",
           "baud_rate": "Baud Rate"
         }
+      },
+      "reconfigure_tcp": {
+        "title": "Reconfigure TCP Connection",
+        "description": "Update the IP address and port of your RS-485 to TCP bridge.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      },
+      "reconfigure_serial": {
+        "title": "Reconfigure Serial Connection",
+        "description": "Update the serial port path for your RS-485 adapter.",
+        "data": {
+          "serial_port": "Serial Port",
+          "baud_rate": "Baud Rate"
+        }
       }
     },
     "error": {
@@ -31,7 +47,18 @@
       "invalid_baud_rate": "Invalid baud rate."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "reconfigure_successful": "Configuration updated successfully."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pentair EasyTouch Options",
+        "data": {
+          "super_chlor_hours": "Super Chlorinate Duration (hours)"
+        }
+      }
     }
   }
 }

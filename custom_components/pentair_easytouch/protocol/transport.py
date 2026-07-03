@@ -26,6 +26,7 @@ from custom_components.pentair_easytouch.const import (
 _LOGGER = logging.getLogger(__name__)
 
 OnDataCallback = Callable[[bytes], None]
+OnConnectionChangedCallback = Callable[[bool], None]
 
 
 class BaseTransport(abc.ABC):
@@ -33,6 +34,7 @@ class BaseTransport(abc.ABC):
 
     def __init__(self, on_data: OnDataCallback | None = None) -> None:
         self._on_data: OnDataCallback | None = on_data
+        self._on_connection_changed: OnConnectionChangedCallback | None = None
         self._connected: bool = False
         self._reconnect_task: asyncio.Task[None] | None = None
         self._read_task: asyncio.Task[None] | None = None
@@ -48,6 +50,18 @@ class BaseTransport(abc.ABC):
         """Set (or replace) the data callback."""
         self._on_data = callback
 
+    def set_on_connection_changed(self, callback: OnConnectionChangedCallback) -> None:
+        """Set (or replace) the connection state change callback."""
+        self._on_connection_changed = callback
+
+    def _set_connected(self, state: bool) -> None:
+        """Update connection state and fire callback on change."""
+        if self._connected == state:
+            return
+        self._connected = state
+        if self._on_connection_changed:
+            self._on_connection_changed(state)
+
     # ------------------------------------------------------------------
     # Public lifecycle
     # ------------------------------------------------------------------
@@ -56,7 +70,7 @@ class BaseTransport(abc.ABC):
         """Open the transport.  May raise on first attempt."""
         self._stop_event.clear()
         await self._do_connect()
-        self._connected = True
+        self._set_connected(True)
         self._retry_delay = RECONNECT_MIN_DELAY
         self._read_task = asyncio.ensure_future(self._read_loop())
 
@@ -76,7 +90,7 @@ class BaseTransport(abc.ABC):
             self._read_task = None
 
         await self._do_disconnect()
-        self._connected = False
+        self._set_connected(False)
 
     async def write(self, data: bytes) -> None:
         """Write raw bytes to the transport.
@@ -129,7 +143,7 @@ class BaseTransport(abc.ABC):
                 except asyncio.CancelledError:
                     return
         finally:
-            self._connected = False
+            self._set_connected(False)
 
         # Connection lost - attempt reconnect unless we were told to stop
         if not self._stop_event.is_set():
@@ -151,7 +165,7 @@ class BaseTransport(abc.ABC):
 
             try:
                 await self._do_connect()
-                self._connected = True
+                self._set_connected(True)
                 self._retry_delay = RECONNECT_MIN_DELAY
                 _LOGGER.info("Reconnected successfully")
                 self._read_task = asyncio.ensure_future(self._read_loop())

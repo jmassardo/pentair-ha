@@ -79,6 +79,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
 
         # Wire transport data callback
         self._transport.set_on_data(self._on_data)
+        self._transport.set_on_connection_changed(self._on_connection_changed)
 
         # Expose initial data so entities have something before first broadcast
         self.data = self._state
@@ -169,6 +170,24 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
     def _on_packet(self, packet: PentairPacket) -> None:
         """Called when framer produces a complete packet. Route to handlers."""
         self._router.dispatch(packet)
+
+    def _on_connection_changed(self, connected: bool) -> None:
+        """Called when transport connection state changes.
+
+        On disconnect: signal update failure so entities become unavailable.
+        On reconnect: the next status broadcast will restore availability
+        via async_set_updated_data, and we re-request config.
+        """
+        if connected:
+            _LOGGER.info("Transport reconnected — requesting config")
+            self._config_request_task = asyncio.ensure_future(
+                self._async_request_config()
+            )
+        else:
+            _LOGGER.warning("Transport disconnected — entities unavailable")
+            self.async_set_update_error(
+                ConnectionError("RS485 transport disconnected")
+            )
 
     @callback
     def _on_state_updated(self) -> None:

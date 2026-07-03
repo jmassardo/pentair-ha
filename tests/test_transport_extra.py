@@ -240,3 +240,73 @@ async def test_serial_transport_handles_missing_wait_closed_and_unset_io() -> No
     assert writer.closed is True
     assert transport._reader is None
     assert transport._writer is None
+
+
+@pytest.mark.asyncio
+async def test_connection_changed_callback_fires_on_connect() -> None:
+    """on_connection_changed fires with True when transport connects."""
+    transport = ReconnectMockTransport()
+    states: list[bool] = []
+    transport.set_on_connection_changed(lambda s: states.append(s))
+
+    await transport.connect()
+
+    assert states == [True]
+    await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_connection_changed_callback_fires_on_disconnect() -> None:
+    """on_connection_changed fires with False when transport disconnects."""
+    transport = ReconnectMockTransport()
+    states: list[bool] = []
+    transport.set_on_connection_changed(lambda s: states.append(s))
+
+    await transport.connect()
+    states.clear()
+
+    await transport.disconnect()
+
+    assert states == [False]
+
+
+@pytest.mark.asyncio
+async def test_connection_changed_callback_fires_on_read_error() -> None:
+    """on_connection_changed fires with False when read loop encounters error."""
+    transport = ReconnectMockTransport()
+    states: list[bool] = []
+    transport.set_on_connection_changed(lambda s: states.append(s))
+
+    await transport.connect()
+    states.clear()
+
+    # Trigger read error → connection lost
+    transport.raise_read_error = True
+    transport.read_queue.put_nowait(b"trigger")
+    await asyncio.sleep(0.05)
+
+    assert False in states
+    await transport.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_connection_changed_callback_fires_on_reconnect() -> None:
+    """on_connection_changed fires True→False→True through reconnect cycle."""
+    transport = ReconnectMockTransport()
+    states: list[bool] = []
+    transport.set_on_connection_changed(lambda s: states.append(s))
+
+    await transport.connect()
+    # Override retry delay after connect() resets it
+    transport._retry_delay = 0.01
+    assert states == [True]
+    states.clear()
+
+    # Trigger disconnect via empty read
+    transport.read_queue.put_nowait(b"")
+    await asyncio.sleep(0.1)
+
+    # Should have disconnected and reconnected
+    assert False in states
+    assert True in states
+    await transport.disconnect()

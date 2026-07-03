@@ -286,3 +286,39 @@ async def test_start_sends_config_requests() -> None:
     coro = mock_create_task.call_args[0][0]
     # Clean up the coroutine to avoid RuntimeWarning
     coro.close()
+
+
+@pytest.mark.asyncio
+async def test_on_connection_changed_disconnect_signals_error() -> None:
+    """When transport disconnects, coordinator signals update error."""
+    coordinator = _make_coordinator_mock()
+    coordinator._on_connection_changed = PentairCoordinator._on_connection_changed.__get__(
+        coordinator, PentairCoordinator
+    )
+
+    coordinator._on_connection_changed(False)
+
+    coordinator.async_set_update_error.assert_called_once()
+    err = coordinator.async_set_update_error.call_args[0][0]
+    assert isinstance(err, ConnectionError)
+
+
+@pytest.mark.asyncio
+async def test_on_connection_changed_reconnect_requests_config() -> None:
+    """When transport reconnects, coordinator re-requests config."""
+    coordinator = _make_coordinator_mock()
+    coordinator._async_request_config = AsyncMock()
+    coordinator._config_request_task = None
+    coordinator._on_connection_changed = PentairCoordinator._on_connection_changed.__get__(
+        coordinator, PentairCoordinator
+    )
+
+    with patch(
+        "custom_components.pentair_easytouch.coordinator.asyncio.ensure_future",
+    ) as mock_ensure:
+        coordinator._on_connection_changed(True)
+
+    mock_ensure.assert_called_once()
+    # Clean up coroutine
+    coro = mock_ensure.call_args[0][0]
+    coro.close()
