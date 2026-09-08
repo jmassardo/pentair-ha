@@ -201,8 +201,10 @@ class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], Switch
     @property
     def _super_chlor_hours(self) -> int:
         """Return configured super chlorinate duration from options."""
-        return self.coordinator.config_entry.options.get(
-            CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS
+        return int(
+            self.coordinator.config_entry.options.get(
+                CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS
+            )
         )
 
     def _find_chlorinator(self) -> Chlorinator | None:
@@ -246,20 +248,35 @@ class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], Switch
         """Activate super chlorination."""
         chlor = self._find_chlorinator()
         if chlor is None:
+            _LOGGER.warning(
+                "Cannot enable super chlorination: chlorinator %d not found",
+                self._chlor_id,
+            )
             return
+        super_chlor_hours = self._super_chlor_hours
         await self.coordinator.command_manager.set_chlorinator(
             pool_pct=chlor.pool_setpoint,
             spa_pct=chlor.spa_setpoint,
-            super_chlor_hours=self._super_chlor_hours,
+            super_chlor_hours=super_chlor_hours,
         )
+        chlor.super_chlor = True
+        chlor.super_chlor_hours = super_chlor_hours
+        self.coordinator.async_set_updated_data(self.coordinator.data)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Deactivate super chlorination."""
         chlor = self._find_chlorinator()
         if chlor is None:
+            _LOGGER.warning(
+                "Cannot disable super chlorination: chlorinator %d not found",
+                self._chlor_id,
+            )
             return
         await self.coordinator.command_manager.set_chlorinator(
             pool_pct=chlor.pool_setpoint,
             spa_pct=chlor.spa_setpoint,
             super_chlor_hours=0,
         )
+        chlor.super_chlor = False
+        chlor.super_chlor_hours = 0
+        self.coordinator.async_set_updated_data(self.coordinator.data)
