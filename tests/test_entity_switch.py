@@ -4,12 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.pentair_easytouch.const import DOMAIN
+from custom_components.pentair_easytouch.const import CONF_SUPER_CHLOR_HOURS, DOMAIN
 from custom_components.pentair_easytouch.coordinator import PentairCoordinator
-from custom_components.pentair_easytouch.model import Circuit, Feature, PoolState
+from custom_components.pentair_easytouch.model import Chlorinator, Circuit, Feature, PoolState
 from custom_components.pentair_easytouch.switch import (
     PentairCircuitSwitch,
     PentairFeatureSwitch,
+    PentairSuperChlorinateSwitch,
     async_setup_entry,
 )
 
@@ -19,6 +20,7 @@ def _make_coordinator(state: PoolState | None = None) -> MagicMock:
     coordinator.data = state
     coordinator.config_entry = MagicMock()
     coordinator.config_entry.entry_id = "test_entry_id"
+    coordinator.config_entry.options = {}
     coordinator.command_manager = MagicMock()
     coordinator.command_manager.set_circuit_state = AsyncMock()
     coordinator.command_manager.set_heat_mode = AsyncMock()
@@ -117,6 +119,110 @@ async def test_feature_switch_turn_on_and_off() -> None:
     coordinator.command_manager.set_circuit_state.assert_any_call(11, False)
 
 
+def test_super_chlorinate_switch_properties() -> None:
+    state = _make_state()
+    state.chlorinators = [
+        Chlorinator(
+            id=1,
+            name="IntelliChlor",
+            pool_setpoint=40,
+            spa_setpoint=10,
+            super_chlor=True,
+            super_chlor_hours=6,
+            is_active=True,
+        )
+    ]
+    coordinator = _make_coordinator(state)
+    entity = PentairSuperChlorinateSwitch(coordinator, chlor_id=1)
+
+    assert entity.name == "IntelliChlor Super Chlorinate"
+    assert entity.is_on is True
+    assert entity.available is True
+    assert entity.device_info == {
+        "identifiers": {(DOMAIN, "test_entry_id")},
+        "name": "Pentair EasyTouch",
+        "manufacturer": "Pentair",
+        "model": "EasyTouch",
+    }
+
+
+@pytest.mark.asyncio
+async def test_super_chlorinate_switch_turn_on_updates_state() -> None:
+    state = _make_state()
+    chlor = Chlorinator(
+        id=1,
+        pool_setpoint=40,
+        spa_setpoint=10,
+        is_active=True,
+    )
+    state.chlorinators = [chlor]
+    coordinator = _make_coordinator(state)
+    coordinator.config_entry.options = {CONF_SUPER_CHLOR_HOURS: 12}
+    entity = PentairSuperChlorinateSwitch(coordinator, chlor_id=1)
+
+    await entity.async_turn_on()
+
+    coordinator.command_manager.set_chlorinator.assert_awaited_once_with(
+        pool_pct=40,
+        spa_pct=10,
+        super_chlor_hours=12,
+    )
+    assert chlor.super_chlor is True
+    assert chlor.super_chlor_hours == 12
+    assert entity.is_on is True
+    coordinator.async_set_updated_data.assert_called_once_with(state)
+
+
+@pytest.mark.asyncio
+async def test_super_chlorinate_switch_turn_off_updates_state() -> None:
+    state = _make_state()
+    chlor = Chlorinator(
+        id=1,
+        pool_setpoint=40,
+        spa_setpoint=10,
+        super_chlor=True,
+        super_chlor_hours=6,
+        is_active=True,
+    )
+    state.chlorinators = [chlor]
+    coordinator = _make_coordinator(state)
+    entity = PentairSuperChlorinateSwitch(coordinator, chlor_id=1)
+
+    await entity.async_turn_off()
+
+    coordinator.command_manager.set_chlorinator.assert_awaited_once_with(
+        pool_pct=40,
+        spa_pct=10,
+        super_chlor_hours=0,
+    )
+    assert chlor.super_chlor is False
+    assert chlor.super_chlor_hours == 0
+    assert entity.is_on is False
+    coordinator.async_set_updated_data.assert_called_once_with(state)
+
+
+@pytest.mark.asyncio
+async def test_super_chlorinate_switch_does_not_update_state_on_command_failure() -> None:
+    state = _make_state()
+    chlor = Chlorinator(
+        id=1,
+        pool_setpoint=40,
+        spa_setpoint=10,
+        is_active=True,
+    )
+    state.chlorinators = [chlor]
+    coordinator = _make_coordinator(state)
+    coordinator.command_manager.set_chlorinator.side_effect = ConnectionError
+    entity = PentairSuperChlorinateSwitch(coordinator, chlor_id=1)
+
+    with pytest.raises(ConnectionError):
+        await entity.async_turn_on()
+
+    assert chlor.super_chlor is False
+    assert chlor.super_chlor_hours == 0
+    coordinator.async_set_updated_data.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_async_setup_entry_filters_out_light_circuits() -> None:
     coordinator = _make_coordinator(_make_state())
@@ -173,14 +279,19 @@ async def test_dynamic_discovery_adds_new_entities() -> None:
         Circuit(id=3, name="Spa Jets", is_on=False, is_light=False, is_active=True),
     ]
     state.features = [Feature(id=12, name="Spillover", is_on=False)]
+    state.chlorinators = [Chlorinator(id=1, name="IntelliChlor", is_active=True)]
 
     # Call the registered listener callback
     discover_cb = coordinator.async_add_listener.call_args.args[0]
     discover_cb()
 
     entities = async_add_entities.call_args.args[0]
-    assert len(entities) == 2
-    assert [entity.name for entity in entities] == ["Spa Jets", "Spillover"]
+    assert len(entities) == 3
+    assert [entity.name for entity in entities] == [
+        "Spa Jets",
+        "Spillover",
+        "IntelliChlor Super Chlorinate",
+    ]
 
     # Call again - should not add duplicates
     async_add_entities.reset_mock()
