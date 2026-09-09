@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pentair-easytouch-ha"
-version = "0.7.2"
+version = "0.7.3"
 description = "Native Home Assistant integration for Pentair EasyTouch pool controllers"
 requires-python = ">=3.12"
 license = {text = "MIT"}
