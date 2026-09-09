@@ -178,6 +178,17 @@ ruff format --check .
 mypy .
 ```
 
+### Branching and Releases
+
+- Create feature and fix branches from `develop`, then open pull requests back to `develop`.
+- Every push to `develop` publishes a prerelease ZIP using the next patch version and a
+  `-dev.<run>` suffix.
+- Production releases are promoted with a pull request from `develop` to `main`.
+- A merged promotion defaults to a patch release. Add exactly one `release:minor` or
+  `release:major` label to the promotion pull request when a larger version bump is required.
+- The production workflow updates both committed version files, tags the release commit, builds
+  `pentair_easytouch.zip`, and publishes the GitHub release automatically.
+
 ### Project Structure
 
 ```
