@@ -124,19 +124,11 @@ def decode_chlorinator_action(
 
     elif action == 17:
         # OCP → Chlorinator: set output percentage
-        # This is the live command the OCP sends, representing the active
-        # body's setpoint.  We use it to derive pool/spa setpoints based on
-        # which body is currently running.
+        # This is the live output command sent to the cell.  During super
+        # chlorination it is 100%, so it must not overwrite configured
+        # pool/spa setpoints.
         if len(payload) > 0:
             chlor.target_output = payload[0]
-            # Derive the active body's setpoint from the target output
-            spa_on = any(
-                c.id == 1 and c.is_on for c in state.circuits
-            )
-            if spa_on:
-                chlor.spa_setpoint = payload[0]
-            else:
-                chlor.pool_setpoint = payload[0]
 
     elif action == 18:
         # Chlorinator → OCP: salt level + status response

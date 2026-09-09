@@ -10,6 +10,7 @@ a *push* model (``async_set_updated_data``) rather than polling.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,12 @@ from .config_flow import (
     CONF_SERIAL_PORT,
     CONNECTION_TCP,
 )
-from .const import ACTION_GET_CIRCUITS, ACTION_GET_CUSTOM_NAMES, DOMAIN
+from .const import (
+    ACTION_GET_CIRCUITS,
+    ACTION_GET_CUSTOM_NAMES,
+    ACTION_GET_INTELLICHLOR,
+    DOMAIN,
+)
 from .model import PoolState
 from .protocol.commands import CommandManager
 from .protocol.framing import PacketFramer
@@ -48,6 +54,9 @@ _CONFIG_CIRCUIT_MAX = 20
 
 # Number of custom name slots on the controller.
 _CUSTOM_NAME_COUNT = 10
+
+# IntelliChlor does not broadcast when its Super Chlorinate timer expires.
+_CHLORINATOR_REFRESH_INTERVAL = 60.0
 
 
 class PentairCoordinator(DataUpdateCoordinator[PoolState]):
@@ -93,6 +102,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
 
         # Reference to the config request background task
         self._config_request_task: asyncio.Task[None] | None = None
+        self._chlorinator_refresh_task: asyncio.Task[None] | None = None
 
     @property
     def command_manager(self) -> CommandManager:
@@ -116,10 +126,16 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         # The controller only broadcasts Action 11 during power-up, so we
         # must actively request it if we start after the controller.
         self._config_request_task = asyncio.create_task(self._async_request_config())
+        self._chlorinator_refresh_task = asyncio.create_task(self._async_refresh_chlorinator())
 
     async def stop(self) -> None:
         """Disconnect transport and clean up."""
         _LOGGER.info("Stopping Pentair EasyTouch coordinator")
+        if self._chlorinator_refresh_task and not self._chlorinator_refresh_task.done():
+            self._chlorinator_refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._chlorinator_refresh_task
+        self._chlorinator_refresh_task = None
         await self._transport.disconnect()
 
     async def wait_for_first_update(self, timeout: float = 10.0) -> None:
@@ -147,8 +163,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
             # so we activate them all — unused ones will just show as OFF.
             if not self._config_received and self._status_received:
                 _LOGGER.info(
-                    "No circuit config received; activating all circuits "
-                    "%d-%d as fallback",
+                    "No circuit config received; activating all circuits %d-%d as fallback",
                     _CONFIG_CIRCUIT_MIN,
                     _CONFIG_CIRCUIT_MAX,
                 )
@@ -159,6 +174,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
                             circuit.name = f"Circuit {circuit.id}"
                 self._first_update_event.set()
                 self.async_set_updated_data(self._state)
+
     # ------------------------------------------------------------------
     # Protocol pipeline callbacks
     # ------------------------------------------------------------------
@@ -180,14 +196,10 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         """
         if connected:
             _LOGGER.info("Transport reconnected — requesting config")
-            self._config_request_task = asyncio.ensure_future(
-                self._async_request_config()
-            )
+            self._config_request_task = asyncio.ensure_future(self._async_request_config())
         else:
             _LOGGER.warning("Transport disconnected — entities unavailable")
-            self.async_set_update_error(
-                ConnectionError("RS485 transport disconnected")
-            )
+            self.async_set_update_error(ConnectionError("RS485 transport disconnected"))
 
     @callback
     def _on_state_updated(self) -> None:
@@ -233,9 +245,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         )
         for name_index in range(_CUSTOM_NAME_COUNT):
             try:
-                await self._command_manager.request_config(
-                    ACTION_GET_CUSTOM_NAMES, name_index
-                )
+                await self._command_manager.request_config(ACTION_GET_CUSTOM_NAMES, name_index)
             except Exception:
                 _LOGGER.debug(
                     "Failed to request custom name %d",
@@ -261,6 +271,23 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
                 )
             await asyncio.sleep(_CONFIG_REQUEST_DELAY)
         _LOGGER.debug("Circuit config requests complete")
+
+    async def _async_refresh_chlorinator(self) -> None:
+        """Periodically request IntelliChlor state to detect timer expiry."""
+        while True:
+            try:
+                await self._command_manager.request_config(
+                    ACTION_GET_INTELLICHLOR,
+                    0,
+                )
+            except asyncio.CancelledError:
+                raise
+            except (ConnectionError, OSError):
+                _LOGGER.debug(
+                    "Failed to refresh IntelliChlor state",
+                    exc_info=True,
+                )
+            await asyncio.sleep(_CHLORINATOR_REFRESH_INTERVAL)
 
     # ------------------------------------------------------------------
     # Helpers
