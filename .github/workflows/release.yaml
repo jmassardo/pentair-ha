@@ -2,56 +2,152 @@ name: Release
 
 on:
   push:
-    tags:
-      - "[0-9]+.[0-9]+.[0-9]+"
+    branches: [main]
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
 
 jobs:
   release:
-    name: Build and publish release
+    name: Publish production release
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Find develop promotion
+        id: promotion
+        uses: actions/github-script@v7
         with:
-          ref: ${{ github.ref }}
+          script: |
+            const { data: pullRequests } =
+              await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+              });
+            const promotion = pullRequests.find(
+              (pullRequest) =>
+                pullRequest.merged_at &&
+                pullRequest.base.ref === "main" &&
+                pullRequest.head.ref === "develop",
+            );
+            if (!promotion) {
+              core.notice("This main push is not a merged develop promotion; skipping release.");
+              core.setOutput("release", "false");
+              return;
+            }
 
-      - name: Set version from tag
+            core.setOutput("release", "true");
+            core.setOutput(
+              "labels",
+              JSON.stringify(promotion.labels.map((label) => label.name)),
+            );
+
+      - uses: actions/checkout@v4
+        if: steps.promotion.outputs.release == 'true'
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Calculate release version
+        if: steps.promotion.outputs.release == 'true'
         id: version
-        run: |
-          version="${GITHUB_REF_NAME}"
-          version="${version#v}"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify release versions
+        env:
+          LABELS: ${{ steps.promotion.outputs.labels }}
         run: |
           python3 - <<'PY'
           import json
           import os
-          import tomllib
+          import re
+          import subprocess
 
-          version = os.environ["VERSION"]
-          with open("custom_components/pentair_easytouch/manifest.json", "rb") as file:
-              manifest_version = json.load(file)["version"]
-          with open("pyproject.toml", "rb") as file:
-              package_version = tomllib.load(file)["project"]["version"]
+          labels = set(json.loads(os.environ["LABELS"]))
+          requested = labels & {"release:patch", "release:minor", "release:major"}
+          if len(requested) > 1:
+              raise SystemExit(f"Conflicting release labels: {sorted(requested)}")
+          bump = next(iter(requested), "release:patch").split(":")[1]
 
-          if manifest_version != version or package_version != version:
-              raise SystemExit(
-                  "Release tag and committed versions must match: "
-                  f"tag={version}, manifest={manifest_version}, package={package_version}"
-              )
+          tags = subprocess.check_output(
+              ["git", "tag", "--list"], text=True
+          ).splitlines()
+          versions = [
+              tuple(map(int, match.groups()))
+              for tag in tags
+              if (match := re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", tag))
+          ]
+          major, minor, patch = max(versions, default=(0, 0, 0))
+          if bump == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif bump == "minor":
+              minor, patch = minor + 1, 0
+          else:
+              patch += 1
+
+          version = f"{major}.{minor}.{patch}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
           PY
+
+      - name: Update committed versions
+        if: steps.promotion.outputs.release == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
 
-      - name: Create zip
+          version = os.environ["VERSION"]
+          manifest_path = Path("custom_components/pentair_easytouch/manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          manifest["version"] = version
+          manifest_path.write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          package_path = Path("pyproject.toml")
+          package = package_path.read_text(encoding="utf-8")
+          package, replacements = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{version}"',
+              package,
+              count=1,
+          )
+          if replacements != 1:
+              raise SystemExit("Could not update project version in pyproject.toml")
+          package_path.write_text(package, encoding="utf-8")
+          PY
+
+      - name: Commit and tag release
+        if: steps.promotion.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/pentair_easytouch/manifest.json pyproject.toml
+          git commit -m "chore: release ${VERSION}"
+          git push origin HEAD:main
+          git tag -a "${VERSION}" -m "Release ${VERSION}"
+          git push origin "${VERSION}"
+
+      - name: Create release zip
+        if: steps.promotion.outputs.release == 'true'
         run: |
           cd custom_components/pentair_easytouch
           zip -r ../../pentair_easytouch.zip .
 
-      - name: Create GitHub release with asset
+      - name: Publish GitHub release
+        if: steps.promotion.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
           files: pentair_easytouch.zip
           generate_release_notes: true
+          make_latest: true

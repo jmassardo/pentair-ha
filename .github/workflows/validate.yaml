@@ -2,11 +2,25 @@ name: Validate
 
 on:
   push:
-    branches: [main]
+    branches: [develop, main]
   pull_request:
-    branches: [main]
+    branches: [develop, main]
 
 jobs:
+  validate-promotion-source:
+    name: Validate production promotion source
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require develop as the source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" != "develop" ]]; then
+            echo "Production PRs must promote the develop branch into main."
+            exit 1
+          fi
+
   validate-hacs:
     name: HACS Validation
     runs-on: ubuntu-latest
