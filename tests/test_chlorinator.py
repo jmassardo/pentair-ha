@@ -70,13 +70,18 @@ class TestDecodeChlorinatorAction:
         decode_chlorinator_action(3, payload, dest=0, state=state)
         assert chlor.name == "My Chlorinator"  # not overwritten
 
-    def test_action_17_set_output(self) -> None:
+    def test_action_17_updates_output_without_overwriting_setpoints(self) -> None:
         state = PoolState()
-        payload = bytes([50])  # 50%
+        chlor = state.get_chlorinator(1)
+        chlor.pool_setpoint = 40
+        chlor.spa_setpoint = 10
+
+        payload = bytes([100])  # Super chlorinate live output
         decode_chlorinator_action(17, payload, dest=80, state=state)
 
-        chlor = state.get_chlorinator(1)
-        assert chlor.target_output == 50
+        assert chlor.target_output == 100
+        assert chlor.pool_setpoint == 40
+        assert chlor.spa_setpoint == 10
 
     def test_action_18_salt_and_status(self) -> None:
         state = PoolState()

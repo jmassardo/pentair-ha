@@ -201,7 +201,7 @@ class PentairSuperChlorinateDurationNumber(CoordinatorEntity[PentairCoordinator]
         """Return the name."""
         chlor = self._find_chlorinator()
         chlor_name = chlor.name if chlor and chlor.name else "Chlorinator"
-        return f"{chlor_name} Super Chlorinate Duration"
+        return f"{chlor_name} Super Chlorinate Pump Runtime"
 
     @property
     def native_value(self) -> float | None:
