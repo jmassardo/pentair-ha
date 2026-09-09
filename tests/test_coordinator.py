@@ -8,8 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.pentair_easytouch.const import ACTION_GET_CIRCUITS, ACTION_GET_CUSTOM_NAMES
+from custom_components.pentair_easytouch.const import (
+    ACTION_GET_CIRCUITS,
+    ACTION_GET_CUSTOM_NAMES,
+    ACTION_GET_INTELLICHLOR,
+)
 from custom_components.pentair_easytouch.coordinator import (
+    _CHLORINATOR_REFRESH_INTERVAL,
     _CONFIG_CIRCUIT_MAX,
     _CONFIG_CIRCUIT_MIN,
     _CUSTOM_NAME_COUNT,
@@ -266,10 +271,11 @@ async def test_async_request_config_handles_transport_errors() -> None:
 
 @pytest.mark.asyncio
 async def test_start_sends_config_requests() -> None:
-    """start() should create a task for config requests after connecting."""
+    """start() should create config and chlorinator refresh tasks."""
     coordinator = MagicMock(spec=PentairCoordinator)
     coordinator._transport = AsyncMock()
     coordinator._async_request_config = AsyncMock()
+    coordinator._async_refresh_chlorinator = AsyncMock()
 
     # Bind the real start method
     coordinator.start = PentairCoordinator.start.__get__(coordinator, PentairCoordinator)
@@ -280,12 +286,65 @@ async def test_start_sends_config_requests() -> None:
         await coordinator.start()
 
     coordinator._transport.connect.assert_called_once()
-    # Verify a task was created for config requests
-    mock_create_task.assert_called_once()
-    # The argument should be the coroutine from _async_request_config
-    coro = mock_create_task.call_args[0][0]
-    # Clean up the coroutine to avoid RuntimeWarning
-    coro.close()
+    assert mock_create_task.call_count == 2
+    for call in mock_create_task.call_args_list:
+        call.args[0].close()
+
+
+@pytest.mark.asyncio
+async def test_refresh_chlorinator_requests_status_every_interval() -> None:
+    """The refresh loop should request IntelliChlor status once per interval."""
+    coordinator = MagicMock(spec=PentairCoordinator)
+    coordinator._command_manager = AsyncMock()
+    coordinator._command_manager.request_config = AsyncMock(
+        side_effect=[None, asyncio.CancelledError]
+    )
+    coordinator._async_refresh_chlorinator = PentairCoordinator._async_refresh_chlorinator.__get__(
+        coordinator,
+        PentairCoordinator,
+    )
+
+    with (
+        patch(
+            "custom_components.pentair_easytouch.coordinator.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep,
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await coordinator._async_refresh_chlorinator()
+
+    assert coordinator._command_manager.request_config.await_count == 2
+    coordinator._command_manager.request_config.assert_awaited_with(
+        ACTION_GET_INTELLICHLOR,
+        0,
+    )
+    mock_sleep.assert_awaited_once_with(_CHLORINATOR_REFRESH_INTERVAL)
+
+
+@pytest.mark.asyncio
+async def test_refresh_chlorinator_retries_after_transport_error() -> None:
+    """A transient transport error should not stop future refreshes."""
+    coordinator = MagicMock(spec=PentairCoordinator)
+    coordinator._command_manager = AsyncMock()
+    coordinator._command_manager.request_config = AsyncMock(
+        side_effect=[ConnectionError("disconnected"), asyncio.CancelledError]
+    )
+    coordinator._async_refresh_chlorinator = PentairCoordinator._async_refresh_chlorinator.__get__(
+        coordinator,
+        PentairCoordinator,
+    )
+
+    with (
+        patch(
+            "custom_components.pentair_easytouch.coordinator.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep,
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await coordinator._async_refresh_chlorinator()
+
+    assert coordinator._command_manager.request_config.await_count == 2
+    mock_sleep.assert_awaited_once_with(_CHLORINATOR_REFRESH_INTERVAL)
 
 
 @pytest.mark.asyncio
