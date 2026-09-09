@@ -6,11 +6,12 @@ import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.const import UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS, DOMAIN
 from .coordinator import PentairCoordinator
 
 if TYPE_CHECKING:
@@ -49,6 +50,10 @@ async def async_setup_entry(
             if uid_spa not in known_ids:
                 known_ids.add(uid_spa)
                 new_entities.append(PentairChlorSetpointNumber(coordinator, chlor.id, "spa"))
+            uid_super_duration = f"chlor_{chlor.id}_super_duration"
+            if uid_super_duration not in known_ids:
+                known_ids.add(uid_super_duration)
+                new_entities.append(PentairSuperChlorinateDurationNumber(coordinator, chlor.id))
 
         for pump in coordinator.data.pumps:
             uid_speed = f"pump_{pump.id}_speed"
@@ -163,6 +168,84 @@ class PentairChlorSetpointNumber(CoordinatorEntity[PentairCoordinator], NumberEn
         )
 
 
+class PentairSuperChlorinateDurationNumber(CoordinatorEntity[PentairCoordinator], NumberEntity):
+    """Number entity for the next super chlorinate cycle duration."""
+
+    _attr_has_entity_name = True
+    _attr_native_min_value = 1
+    _attr_native_max_value = 72
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_native_unit_of_measurement = UnitOfTime.HOURS
+    _attr_icon = "mdi:timer-cog"
+
+    def __init__(self, coordinator: PentairCoordinator, chlor_id: int) -> None:
+        """Initialize the super chlorinate duration number."""
+        super().__init__(coordinator)
+        self._chlor_id = chlor_id
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_chlorinator_{chlor_id}_super_duration"
+        )
+
+    def _find_chlorinator(self) -> Chlorinator | None:
+        """Find this chlorinator in the coordinator data."""
+        if self.coordinator.data is None:
+            return None
+        for chlor in self.coordinator.data.chlorinators:
+            if chlor.id == self._chlor_id:
+                return chlor
+        return None
+
+    @property
+    def name(self) -> str:
+        """Return the name."""
+        chlor = self._find_chlorinator()
+        chlor_name = chlor.name if chlor and chlor.name else "Chlorinator"
+        return f"{chlor_name} Super Chlorinate Duration"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the configured duration in hours."""
+        if self._find_chlorinator() is None:
+            return None
+        return float(
+            self.coordinator.config_entry.options.get(
+                CONF_SUPER_CHLOR_HOURS, DEFAULT_SUPER_CHLOR_HOURS
+            )
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return (
+            super().available
+            and self.coordinator.data is not None
+            and self._find_chlorinator() is not None
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information about the Pentair controller."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            name="Pentair EasyTouch",
+            manufacturer="Pentair",
+            model="EasyTouch",
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist the duration used by the next super chlorinate activation."""
+        hours = int(value)
+        options = {
+            **self.coordinator.config_entry.options,
+            CONF_SUPER_CHLOR_HOURS: hours,
+        }
+        self.coordinator.hass.config_entries.async_update_entry(
+            self.coordinator.config_entry,
+            options=options,
+        )
+
+
 class PentairPumpSpeedNumber(CoordinatorEntity[PentairCoordinator], NumberEntity):
     """Number entity for setting pump speed in RPM."""
 
@@ -178,9 +261,7 @@ class PentairPumpSpeedNumber(CoordinatorEntity[PentairCoordinator], NumberEntity
         """Initialize the pump speed number entity."""
         super().__init__(coordinator)
         self._pump_id = pump_id
-        self._attr_unique_id = (
-            f"{coordinator.config_entry.entry_id}_pump_{pump_id}_speed"
-        )
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_pump_{pump_id}_speed"
 
     def _find_pump(self) -> Pump | None:
         """Find this pump in the coordinator data."""

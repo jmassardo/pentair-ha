@@ -4,12 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.pentair_easytouch.const import DOMAIN
+from custom_components.pentair_easytouch.const import CONF_SUPER_CHLOR_HOURS, DOMAIN
 from custom_components.pentair_easytouch.coordinator import PentairCoordinator
 from custom_components.pentair_easytouch.model import Chlorinator, PoolState, Pump
 from custom_components.pentair_easytouch.number import (
     PentairChlorSetpointNumber,
     PentairPumpSpeedNumber,
+    PentairSuperChlorinateDurationNumber,
     async_setup_entry,
 )
 
@@ -19,6 +20,8 @@ def _make_coordinator(state: PoolState | None = None) -> MagicMock:
     coordinator.data = state
     coordinator.config_entry = MagicMock()
     coordinator.config_entry.entry_id = "test_entry_id"
+    coordinator.config_entry.options = {}
+    coordinator.hass = MagicMock()
     coordinator.command_manager = MagicMock()
     coordinator.command_manager.set_circuit_state = AsyncMock()
     coordinator.command_manager.set_heat_mode = AsyncMock()
@@ -114,7 +117,11 @@ async def test_async_setup_entry_adds_pool_and_spa_numbers() -> None:
     await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
 
     entities = async_add_entities.call_args.args[0]
-    assert [entity.name for entity in entities] == ["IC40 Pool Setpoint", "IC40 Spa Setpoint"]
+    assert [entity.name for entity in entities] == [
+        "IC40 Pool Setpoint",
+        "IC40 Spa Setpoint",
+        "IC40 Super Chlorinate Duration",
+    ]
 
     # Listener should be registered for dynamic discovery
     coordinator.async_add_listener.assert_called_once()
@@ -141,8 +148,12 @@ async def test_number_dynamic_discovery_adds_new_chlorinators() -> None:
     discover_cb()
 
     entities = async_add_entities.call_args.args[0]
-    assert len(entities) == 2
-    assert [e.name for e in entities] == ["IC40 Pool Setpoint", "IC40 Spa Setpoint"]
+    assert len(entities) == 3
+    assert [e.name for e in entities] == [
+        "IC40 Pool Setpoint",
+        "IC40 Spa Setpoint",
+        "IC40 Super Chlorinate Duration",
+    ]
 
     # Call again - should not add duplicates
     async_add_entities.reset_mock()
@@ -150,12 +161,68 @@ async def test_number_dynamic_discovery_adds_new_chlorinators() -> None:
     async_add_entities.assert_not_called()
 
 
+def test_super_chlorinate_duration_properties() -> None:
+    coordinator = _make_coordinator(_make_state())
+    coordinator.config_entry.options = {CONF_SUPER_CHLOR_HOURS: 12}
+    entity = PentairSuperChlorinateDurationNumber(coordinator, chlor_id=1)
+
+    assert entity.name == "IC40 Super Chlorinate Duration"
+    assert entity.native_value == 12.0
+    assert entity.native_min_value == 1
+    assert entity.native_max_value == 72
+    assert entity.native_step == 1
+    assert entity.native_unit_of_measurement == "h"
+    assert entity.available is True
+    assert entity.device_info == {
+        "identifiers": {(DOMAIN, "test_entry_id")},
+        "name": "Pentair EasyTouch",
+        "manufacturer": "Pentair",
+        "model": "EasyTouch",
+    }
+
+
+def test_super_chlorinate_duration_uses_default() -> None:
+    entity = PentairSuperChlorinateDurationNumber(
+        _make_coordinator(_make_state()),
+        chlor_id=1,
+    )
+
+    assert entity.native_value == 8.0
+
+
+@pytest.mark.asyncio
+async def test_set_super_chlorinate_duration_updates_options_only() -> None:
+    coordinator = _make_coordinator(_make_state())
+    coordinator.config_entry.options = {"existing": "value"}
+    entity = PentairSuperChlorinateDurationNumber(coordinator, chlor_id=1)
+
+    await entity.async_set_native_value(16.0)
+
+    coordinator.hass.config_entries.async_update_entry.assert_called_once_with(
+        coordinator.config_entry,
+        options={"existing": "value", CONF_SUPER_CHLOR_HOURS: 16},
+    )
+    coordinator.command_manager.set_chlorinator.assert_not_called()
+
+
+def test_super_chlorinate_duration_unavailable_without_chlorinator() -> None:
+    entity = PentairSuperChlorinateDurationNumber(
+        _make_coordinator(PoolState()),
+        chlor_id=1,
+    )
+
+    assert entity.native_value is None
+    assert entity.available is False
+
+
 # --- Pump Speed Number Tests ---
 
 
 def _make_state_with_pump() -> PoolState:
     state = PoolState()
-    state.pumps = [Pump(id=1, name="IntelliFlo VS", address=96, is_active=True, rpm=2400, watts=150)]
+    state.pumps = [
+        Pump(id=1, name="IntelliFlo VS", address=96, is_active=True, rpm=2400, watts=150)
+    ]
     return state
 
 
@@ -244,8 +311,9 @@ async def test_setup_discovers_pump_speed_entities() -> None:
     names = [e.name for e in entities]
     assert "IC40 Pool Setpoint" in names
     assert "IC40 Spa Setpoint" in names
+    assert "IC40 Super Chlorinate Duration" in names
     assert "IntelliFlo VS Speed" in names
-    assert len(entities) == 3
+    assert len(entities) == 4
 
 
 @pytest.mark.asyncio
