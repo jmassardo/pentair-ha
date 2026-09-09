@@ -120,7 +120,7 @@ async def test_async_setup_entry_adds_pool_and_spa_numbers() -> None:
     assert [entity.name for entity in entities] == [
         "IC40 Pool Setpoint",
         "IC40 Spa Setpoint",
-        "IC40 Super Chlorinate Pump Runtime",
+        "IC40 Super Chlorinate Duration",
     ]
 
     # Listener should be registered for dynamic discovery
@@ -152,7 +152,7 @@ async def test_number_dynamic_discovery_adds_new_chlorinators() -> None:
     assert [e.name for e in entities] == [
         "IC40 Pool Setpoint",
         "IC40 Spa Setpoint",
-        "IC40 Super Chlorinate Pump Runtime",
+        "IC40 Super Chlorinate Duration",
     ]
 
     # Call again - should not add duplicates
@@ -166,7 +166,7 @@ def test_super_chlorinate_duration_properties() -> None:
     coordinator.config_entry.options = {CONF_SUPER_CHLOR_HOURS: 12}
     entity = PentairSuperChlorinateDurationNumber(coordinator, chlor_id=1)
 
-    assert entity.name == "IC40 Super Chlorinate Pump Runtime"
+    assert entity.name == "IC40 Super Chlorinate Duration"
     assert entity.native_value == 12.0
     assert entity.native_min_value == 1
     assert entity.native_max_value == 72
@@ -311,7 +311,7 @@ async def test_setup_discovers_pump_speed_entities() -> None:
     names = [e.name for e in entities]
     assert "IC40 Pool Setpoint" in names
     assert "IC40 Spa Setpoint" in names
-    assert "IC40 Super Chlorinate Pump Runtime" in names
+    assert "IC40 Super Chlorinate Duration" in names
     assert "IntelliFlo VS Speed" in names
     assert len(entities) == 4
 
