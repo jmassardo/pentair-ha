@@ -23,18 +23,24 @@ jobs:
           version="${version#v}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
-      - name: Update manifest version
+      - name: Verify release versions
         run: |
           python3 - <<'PY'
-          import json, os
-          path = "custom_components/pentair_easytouch/manifest.json"
+          import json
+          import os
+          import tomllib
+
           version = os.environ["VERSION"]
-          with open(path) as f:
-              data = json.load(f)
-          data["version"] = version
-          with open(path, "w") as f:
-              json.dump(data, f, indent=2)
-              f.write("\n")
+          with open("custom_components/pentair_easytouch/manifest.json", "rb") as file:
+              manifest_version = json.load(file)["version"]
+          with open("pyproject.toml", "rb") as file:
+              package_version = tomllib.load(file)["project"]["version"]
+
+          if manifest_version != version or package_version != version:
+              raise SystemExit(
+                  "Release tag and committed versions must match: "
+                  f"tag={version}, manifest={manifest_version}, package={package_version}"
+              )
           PY
         env:
           VERSION: ${{ steps.version.outputs.version }}
