@@ -83,6 +83,26 @@ class TestDecodeChlorinatorAction:
         assert chlor.pool_setpoint == 40
         assert chlor.spa_setpoint == 10
 
+    def test_action_17_does_not_overwrite_setpoint(self) -> None:
+        """Action 17 should update target_output but NOT overwrite setpoints.
+
+        The setpoint is authoritative from the Action 25 broadcast.
+        Action 17 reports the live target output for the active body, which
+        can differ from the configured pool and spa setpoints.
+        """
+        state = PoolState()
+        chlor = state.get_chlorinator(1)
+        chlor.pool_setpoint = 100
+        chlor.spa_setpoint = 30
+
+        payload = bytes([1])
+        decode_chlorinator_action(17, payload, dest=80, state=state)
+
+        chlor = state.get_chlorinator(1)
+        assert chlor.target_output == 1  # byte0 is target_output
+        assert chlor.pool_setpoint == 100  # NOT overwritten by byte0
+        assert chlor.spa_setpoint == 30  # NOT overwritten
+
     def test_action_18_salt_and_status(self) -> None:
         state = PoolState()
         payload = bytes([60, 0x04])  # salt = 60*50 = 3000, status = 4

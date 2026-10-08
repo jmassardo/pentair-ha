@@ -163,10 +163,11 @@ async def test_super_chlorinate_switch_turn_on_updates_state() -> None:
     await entity.async_turn_on()
 
     coordinator.command_manager.set_chlorinator.assert_awaited_once_with(
-        pool_pct=40,
+        pool_pct=100,
         spa_pct=10,
         super_chlor_hours=12,
     )
+    assert chlor.pool_setpoint == 100
     assert chlor.super_chlor is True
     assert chlor.super_chlor_hours == 12
     assert entity.is_on is True
@@ -221,6 +222,72 @@ async def test_super_chlorinate_switch_does_not_update_state_on_command_failure(
     assert chlor.super_chlor is False
     assert chlor.super_chlor_hours == 0
     coordinator.async_set_updated_data.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_super_chlorinate_sets_100_percent_and_restores_previous_value() -> None:
+    state = PoolState(
+        chlorinators=[
+            Chlorinator(
+                id=1,
+                name="IC40",
+                pool_setpoint=40,
+                spa_setpoint=10,
+                is_active=True,
+            )
+        ]
+    )
+    coordinator = _make_coordinator(state)
+    entity = PentairSuperChlorinateSwitch(coordinator, chlor_id=1)
+
+    await entity.async_turn_on()
+
+    coordinator.command_manager.set_chlorinator.assert_awaited_once_with(
+        pool_pct=100,
+        spa_pct=10,
+        super_chlor_hours=8,
+    )
+
+    state.chlorinators[0].pool_setpoint = 100
+    state.chlorinators[0].super_chlor = True
+    coordinator.command_manager.set_chlorinator.reset_mock()
+
+    await entity.async_turn_off()
+
+    coordinator.command_manager.set_chlorinator.assert_awaited_once_with(
+        pool_pct=40,
+        spa_pct=10,
+        super_chlor_hours=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_super_chlorinate_repeated_enable_keeps_original_setpoint() -> None:
+    state = PoolState(
+        chlorinators=[
+            Chlorinator(
+                id=1,
+                pool_setpoint=35,
+                spa_setpoint=5,
+                is_active=True,
+            )
+        ]
+    )
+    coordinator = _make_coordinator(state)
+    entity = PentairSuperChlorinateSwitch(coordinator, chlor_id=1)
+
+    await entity.async_turn_on()
+    state.chlorinators[0].pool_setpoint = 100
+    await entity.async_turn_on()
+    coordinator.command_manager.set_chlorinator.reset_mock()
+
+    await entity.async_turn_off()
+
+    coordinator.command_manager.set_chlorinator.assert_awaited_once_with(
+        pool_pct=35,
+        spa_pct=5,
+        super_chlor_hours=0,
+    )
 
 
 @pytest.mark.asyncio
