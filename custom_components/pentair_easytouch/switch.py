@@ -197,6 +197,7 @@ class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], Switch
         self._attr_unique_id = (
             f"{coordinator.config_entry.entry_id}_chlorinator_{chlor_id}_super_chlor"
         )
+        self._previous_pool_setpoint: int | None = None
 
     @property
     def _super_chlor_hours(self) -> int:
@@ -253,12 +254,24 @@ class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], Switch
                 self._chlor_id,
             )
             return
+
+        captured_setpoint = self._previous_pool_setpoint is None
+        if captured_setpoint:
+            self._previous_pool_setpoint = chlor.pool_setpoint
+
         super_chlor_hours = self._super_chlor_hours
-        await self.coordinator.command_manager.set_chlorinator(
-            pool_pct=chlor.pool_setpoint,
-            spa_pct=chlor.spa_setpoint,
-            super_chlor_hours=super_chlor_hours,
-        )
+        try:
+            await self.coordinator.command_manager.set_chlorinator(
+                pool_pct=100,
+                spa_pct=chlor.spa_setpoint,
+                super_chlor_hours=super_chlor_hours,
+            )
+        except Exception:
+            if captured_setpoint:
+                self._previous_pool_setpoint = None
+            raise
+
+        chlor.pool_setpoint = 100
         chlor.super_chlor = True
         chlor.super_chlor_hours = super_chlor_hours
         self.coordinator.async_set_updated_data(self.coordinator.data)
@@ -272,11 +285,19 @@ class PentairSuperChlorinateSwitch(CoordinatorEntity[PentairCoordinator], Switch
                 self._chlor_id,
             )
             return
+
+        pool_pct = (
+            self._previous_pool_setpoint
+            if self._previous_pool_setpoint is not None
+            else chlor.pool_setpoint
+        )
         await self.coordinator.command_manager.set_chlorinator(
-            pool_pct=chlor.pool_setpoint,
+            pool_pct=pool_pct,
             spa_pct=chlor.spa_setpoint,
             super_chlor_hours=0,
         )
+        chlor.pool_setpoint = pool_pct
+        self._previous_pool_setpoint = None
         chlor.super_chlor = False
         chlor.super_chlor_hours = 0
         self.coordinator.async_set_updated_data(self.coordinator.data)
