@@ -1,4 +1,4 @@
-"""Select platform for Pentair EasyTouch heat mode selectors."""
+"""Select platform for Pentair EasyTouch controls."""
 
 from __future__ import annotations
 
@@ -12,14 +12,20 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import PentairCoordinator
-from .protocol.valuemaps import HEAT_MODE_NAMES, HeatMode
+from .protocol.valuemaps import (
+    HEAT_MODE_NAMES,
+    LIGHT_THEME_NAMES,
+    LIGHT_THEME_OPTIONS,
+    HeatMode,
+    is_light_name,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .model import PoolBody
+    from .model import Circuit, PoolBody
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +62,16 @@ async def async_setup_entry(
             if uid not in known_ids:
                 known_ids.add(uid)
                 new_entities.append(PentairHeatModeSelect(coordinator, body.id))
+
+        for circuit in coordinator.data.circuits:
+            uid = f"light_theme_{circuit.id}"
+            if (
+                uid not in known_ids
+                and (circuit.is_light or is_light_name(circuit.name))
+                and circuit.is_active
+            ):
+                known_ids.add(uid)
+                new_entities.append(PentairLightThemeSelect(coordinator, circuit.id))
 
         if new_entities:
             async_add_entities(new_entities)
@@ -154,3 +170,77 @@ class PentairHeatModeSelect(CoordinatorEntity[PentairCoordinator], SelectEntity)
             if body.id == other_id:
                 return body
         return None
+
+
+class PentairLightThemeSelect(CoordinatorEntity[PentairCoordinator], SelectEntity):
+    """Select entity for an IntelliBrite light theme."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:palette"
+
+    def __init__(self, coordinator: PentairCoordinator, circuit_id: int) -> None:
+        """Initialize the IntelliBrite theme selector."""
+        super().__init__(coordinator)
+        self._circuit_id = circuit_id
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_light_{circuit_id}_theme"
+        self._attr_options = list(LIGHT_THEME_OPTIONS)
+
+    def _find_circuit(self) -> Circuit | None:
+        """Find this light circuit in the coordinator data."""
+        if self.coordinator.data is None:
+            return None
+        for circuit in self.coordinator.data.circuits:
+            if circuit.id == self._circuit_id:
+                return circuit
+        return None
+
+    @property
+    def name(self) -> str:
+        """Return the selector name."""
+        circuit = self._find_circuit()
+        circuit_name = circuit.name if circuit and circuit.name else "IntelliBrite"
+        return f"{circuit_name} Theme"
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the active IntelliBrite theme."""
+        circuit = self._find_circuit()
+        if circuit is None:
+            return None
+        option = LIGHT_THEME_NAMES.get(circuit.lighting_theme)
+        return option if option in LIGHT_THEME_OPTIONS else None
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        circuit = self._find_circuit()
+        return super().available and circuit is not None and circuit.is_active
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information about the Pentair controller."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.config_entry.entry_id)},
+            name="Pentair EasyTouch",
+            manufacturer="Pentair",
+            model="EasyTouch",
+        )
+
+    async def async_select_option(self, option: str) -> None:
+        """Turn on the light relay and set its IntelliBrite theme."""
+        theme = LIGHT_THEME_OPTIONS.get(option)
+        if theme is None:
+            _LOGGER.warning("Unknown light theme option: %s", option)
+            return
+
+        circuit = self._find_circuit()
+        if circuit is None:
+            return
+
+        await self.coordinator.command_manager.set_circuit_state(circuit.id, True)
+        await self.coordinator.command_manager.set_light_theme(theme)
+        circuit.is_on = True
+        for light in self.coordinator.data.circuits:
+            if light.is_on and (light.is_light or is_light_name(light.name)):
+                light.lighting_theme = theme
+        self.coordinator.async_set_updated_data(self.coordinator.data)

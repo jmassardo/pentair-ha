@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING
 
 from custom_components.pentair_easytouch.protocol.valuemaps import (
     HeatStatus,
+    is_light_name,
 )
 
 if TYPE_CHECKING:
@@ -195,7 +196,7 @@ def decode_intellibrite(payload: bytes, state: PoolState) -> None:
 
     Payload: [0] theme byte, [1] (reserved)
 
-    We store the theme on all active light circuits.
+    We store the theme on all active light circuits that are currently on.
     """
     if len(payload) < 1:
         return
@@ -206,7 +207,7 @@ def decode_intellibrite(payload: bytes, state: PoolState) -> None:
         return
 
     for circuit in state.circuits:
-        if circuit.is_light and circuit.is_on:
+        if (circuit.is_light or is_light_name(circuit.name)) and circuit.is_on:
             circuit.lighting_theme = theme
 
 
