@@ -130,6 +130,30 @@ async def test_async_setup_entry_adds_only_light_circuits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_setup_entry_adds_generic_circuit_named_as_light() -> None:
+    state = PoolState(
+        circuits=[
+            Circuit(
+                id=7,
+                name="Pool Light",
+                is_light=False,
+                is_active=True,
+            )
+        ]
+    )
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    entities = async_add_entities.call_args.args[0]
+    assert len(entities) == 1
+    assert isinstance(entities[0], PentairLight)
+
+
+@pytest.mark.asyncio
 async def test_dynamic_discovery_adds_new_light_entities() -> None:
     state = PoolState()
     coordinator = _make_coordinator(state)

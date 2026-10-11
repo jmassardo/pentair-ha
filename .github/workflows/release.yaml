@@ -67,25 +67,40 @@ jobs:
           requested = labels & {"release:patch", "release:minor", "release:major"}
           if len(requested) > 1:
               raise SystemExit(f"Conflicting release labels: {sorted(requested)}")
-          bump = next(iter(requested), "release:patch").split(":")[1]
 
           tags = subprocess.check_output(
               ["git", "tag", "--list"], text=True
           ).splitlines()
-          versions = [
+          stable_versions = [
               tuple(map(int, match.groups()))
               for tag in tags
               if (match := re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", tag))
           ]
-          major, minor, patch = max(versions, default=(0, 0, 0))
-          if bump == "major":
-              major, minor, patch = major + 1, 0, 0
-          elif bump == "minor":
-              minor, patch = minor + 1, 0
-          else:
-              patch += 1
+          stable = max(stable_versions, default=(0, 0, 0))
+          prerelease_versions = [
+              tuple(map(int, match.groups()))
+              for tag in tags
+              if (match := re.fullmatch(r"(\d+)\.(\d+)\.(\d+)-dev\.\d+", tag))
+          ]
+          active_prerelease = max(
+              (version for version in prerelease_versions if version > stable),
+              default=None,
+          )
 
-          version = f"{major}.{minor}.{patch}"
+          major, minor, patch = stable
+          bump = next(iter(requested), "release:patch").split(":")[1]
+          if bump == "major":
+              requested_version = (major + 1, 0, 0)
+          elif bump == "minor":
+              requested_version = (major, minor + 1, 0)
+          else:
+              requested_version = (major, minor, patch + 1)
+
+          target = max(
+              requested_version,
+              active_prerelease or requested_version,
+          )
+          version = f"{target[0]}.{target[1]}.{target[2]}"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\n")
           PY

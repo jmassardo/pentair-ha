@@ -140,6 +140,11 @@ def is_light_function(func_id: int) -> bool:
     return func_id in LIGHT_FUNCTIONS
 
 
+def is_light_name(name: str) -> bool:
+    """Return True if a configured circuit name identifies a light."""
+    return "light" in name.casefold()
+
+
 # ---------------------------------------------------------------------------
 # Feature functions  (EasyTouch)
 # ---------------------------------------------------------------------------

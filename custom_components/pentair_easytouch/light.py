@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import PentairCoordinator
-from .protocol.valuemaps import LIGHT_THEME_NAMES, LightTheme
+from .protocol.valuemaps import LIGHT_THEME_NAMES, LightTheme, is_light_name
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -72,7 +72,11 @@ async def async_setup_entry(
 
         for circuit in coordinator.data.circuits:
             uid = f"light_{circuit.id}"
-            if uid not in known_ids and circuit.is_light and circuit.is_active:
+            if (
+                uid not in known_ids
+                and (circuit.is_light or is_light_name(circuit.name))
+                and circuit.is_active
+            ):
                 known_ids.add(uid)
                 new_entities.append(PentairLight(coordinator, circuit.id))
 

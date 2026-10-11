@@ -14,29 +14,87 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     steps:
+      - name: Find merged develop pull request
+        id: promotion
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pullRequests } =
+              await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+              });
+            const mergedPullRequest = pullRequests.find(
+              (pullRequest) =>
+                pullRequest.merged_at &&
+                pullRequest.base.ref === "develop",
+            );
+            core.setOutput(
+              "labels",
+              JSON.stringify(
+                mergedPullRequest?.labels.map((label) => label.name) ?? [],
+              ),
+            );
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Calculate prerelease version
         id: version
+        env:
+          LABELS: ${{ steps.promotion.outputs.labels }}
         run: |
           python3 - <<'PY'
+          import json
           import os
           import re
           import subprocess
 
+          labels = set(json.loads(os.environ["LABELS"]))
+          requested = labels & {"release:patch", "release:minor", "release:major"}
+          if len(requested) > 1:
+              raise SystemExit(f"Conflicting release labels: {sorted(requested)}")
+
           tags = subprocess.check_output(
               ["git", "tag", "--list"], text=True
           ).splitlines()
-          versions = [
+          stable_versions = [
               tuple(map(int, match.groups()))
               for tag in tags
               if (match := re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", tag))
           ]
-          major, minor, patch = max(versions, default=(0, 0, 0))
-          version = f"{major}.{minor}.{patch + 1}-dev.{os.environ['GITHUB_RUN_NUMBER']}"
+          stable = max(stable_versions, default=(0, 0, 0))
+          prerelease_versions = [
+              tuple(map(int, match.groups()))
+              for tag in tags
+              if (match := re.fullmatch(r"(\d+)\.(\d+)\.(\d+)-dev\.\d+", tag))
+          ]
+          active_prerelease = max(
+              (version for version in prerelease_versions if version > stable),
+              default=None,
+          )
+
+          major, minor, patch = stable
+          bump = next(iter(requested), "release:patch").split(":")[1]
+          if bump == "major":
+              requested_version = (major + 1, 0, 0)
+          elif bump == "minor":
+              requested_version = (major, minor + 1, 0)
+          else:
+              requested_version = (major, minor, patch + 1)
+
+          target = max(
+              requested_version,
+              active_prerelease or requested_version,
+          )
+          version = (
+              f"{target[0]}.{target[1]}.{target[2]}"
+              f"-dev.{os.environ['GITHUB_RUN_NUMBER']}"
+          )
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\n")
           PY
