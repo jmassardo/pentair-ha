@@ -181,11 +181,13 @@ mypy .
 ### Branching and Releases
 
 - Create feature and fix branches from `develop`, then open pull requests back to `develop`.
-- Every push to `develop` publishes a prerelease ZIP using the next patch version and a
-  `-dev.<run>` suffix.
+- Every push to `develop` publishes a prerelease ZIP with a `-dev.<run>` suffix. Add exactly one
+  `release:minor` or `release:major` label to a feature pull request when it should start a larger
+  prerelease version line; later develop builds continue using that line.
 - Production releases are promoted with a pull request from `develop` to `main`.
-- A merged promotion defaults to a patch release. Add exactly one `release:minor` or
-  `release:major` label to the promotion pull request when a larger version bump is required.
+- A merged promotion publishes the active prerelease version. If no prerelease exists, it defaults
+  to a patch release. A `release:minor` or `release:major` label on the promotion pull request can
+  request a larger bump.
 - The production workflow updates both committed version files, tags the release commit, builds
   `pentair_easytouch.zip`, and publishes the GitHub release automatically.
 
