@@ -124,7 +124,10 @@ async def test_set_temperature_calls_command_manager() -> None:
         current_spa_setpoint=102,
         current_pool_mode=HeatMode.HEATER,
         current_spa_mode=HeatMode.SOLAR_ONLY,
+        cool_setpoint=85,
     )
+    assert coordinator.data.get_body(1).set_point == 86
+    coordinator.async_set_updated_data.assert_called_once_with(coordinator.data)
 
 
 @pytest.mark.asyncio
@@ -151,6 +154,7 @@ async def test_set_temperature_uses_default_other_body_values() -> None:
         current_spa_setpoint=100,
         current_pool_mode=HeatMode.HEATER,
         current_spa_mode=0,
+        cool_setpoint=85,
     )
 
 
@@ -168,7 +172,9 @@ async def test_set_hvac_mode_calls_command_manager() -> None:
         current_spa_setpoint=102,
         current_pool_mode=HeatMode.HEATER,
         current_spa_mode=HeatMode.SOLAR_ONLY,
+        cool_setpoint=85,
     )
+    coordinator.async_set_updated_data.assert_called_once_with(coordinator.data)
 
 
 @pytest.mark.asyncio
@@ -185,6 +191,7 @@ async def test_set_preset_mode_calls_command_manager() -> None:
         current_spa_setpoint=102,
         current_pool_mode=HeatMode.HEATER,
         current_spa_mode=HeatMode.SOLAR_ONLY,
+        cool_setpoint=85,
     )
 
 
