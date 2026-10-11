@@ -213,18 +213,23 @@ class PentairBodyClimate(CoordinatorEntity[PentairCoordinator], ClimateEntity):
         other_body = self._find_other_body()
         other_setpoint = other_body.set_point if other_body else 100
         other_mode = other_body.heat_mode if other_body else 0
+        cool_setpoint = self._get_pool_cool_setpoint()
 
         # Determine which body is pool (id=1) and which is spa (id=2)
         body_idx = 0 if self._body_id == 1 else 1
+        new_temperature = int(temperature)
 
         await self.coordinator.command_manager.set_heat_setpoint(
             body_id=body_idx,
-            temp=int(temperature),
+            temp=new_temperature,
             current_pool_setpoint=body.set_point if body_idx == 0 else other_setpoint,
             current_spa_setpoint=body.set_point if body_idx == 1 else other_setpoint,
             current_pool_mode=body.heat_mode if body_idx == 0 else other_mode,
             current_spa_mode=body.heat_mode if body_idx == 1 else other_mode,
+            cool_setpoint=cool_setpoint,
         )
+        body.set_point = new_temperature
+        self.coordinator.async_set_updated_data(self.coordinator.data)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set the HVAC mode (off or heat)."""
@@ -254,6 +259,7 @@ class PentairBodyClimate(CoordinatorEntity[PentairCoordinator], ClimateEntity):
         other_body = self._find_other_body()
         other_setpoint = other_body.set_point if other_body else 100
         other_mode = other_body.heat_mode if other_body else 0
+        cool_setpoint = self._get_pool_cool_setpoint()
 
         body_idx = 0 if self._body_id == 1 else 1
 
@@ -264,7 +270,20 @@ class PentairBodyClimate(CoordinatorEntity[PentairCoordinator], ClimateEntity):
             current_spa_setpoint=body.set_point if body_idx == 1 else other_setpoint,
             current_pool_mode=body.heat_mode if body_idx == 0 else other_mode,
             current_spa_mode=body.heat_mode if body_idx == 1 else other_mode,
+            cool_setpoint=cool_setpoint,
         )
+        body.heat_mode = mode
+        self.coordinator.async_set_updated_data(self.coordinator.data)
+
+    def _get_pool_cool_setpoint(self) -> int:
+        """Return the configured pool cool setpoint or a safe preserved value."""
+        pool_body = self._find_body() if self._body_id == 1 else self._find_other_body()
+        if pool_body is None:
+            return 101
+        if pool_body.cool_set_point > 0:
+            return pool_body.cool_set_point
+        pool_setpoint = pool_body.set_point or 100
+        return min(pool_setpoint + 1, 104)
 
     def _find_other_body(self) -> PoolBody | None:
         """Find the other body (pool↔spa) in the coordinator data."""

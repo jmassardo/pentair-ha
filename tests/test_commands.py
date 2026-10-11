@@ -95,6 +95,17 @@ class TestSetCircuitState:
         pkt = _parse_last_packet(transport)
         assert pkt.payload == bytes([6, 0])
 
+    async def test_pool_on_turns_spa_off_when_spa_is_active(self, transport: FakeTransport) -> None:
+        state = PoolState()
+        state.get_circuit(1).is_on = True
+        cmd = CommandManager(transport, state=state)
+        cmd._RETRY_DELAY = 0.0
+
+        await cmd.set_circuit_state(6, True)
+
+        pkt = _parse_last_packet(transport)
+        assert pkt.payload == bytes([1, 0])
+
     async def test_circuit_id_boundaries(
         self, transport: FakeTransport, cmd: CommandManager
     ) -> None:
@@ -138,7 +149,7 @@ class TestSetHeatMode:
         assert pkt.payload[0] == 85  # pool setpoint
         assert pkt.payload[1] == 100  # spa setpoint
         assert pkt.payload[2] == 1  # (0<<2)|1 = pool heater on
-        assert pkt.payload[3] == 0  # cool setpoint
+        assert pkt.payload[3] == 86  # pool setpoint + 1
 
     async def test_spa_solar_preferred(self, transport: FakeTransport, cmd: CommandManager) -> None:
         await cmd.set_heat_mode(

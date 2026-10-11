@@ -313,6 +313,28 @@ async def test_async_setup_entry_filters_out_light_circuits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_setup_entry_filters_out_generic_circuit_named_as_light() -> None:
+    state = PoolState(
+        circuits=[
+            Circuit(
+                id=7,
+                name="Pool Light",
+                is_light=False,
+                is_active=True,
+            )
+        ]
+    )
+    coordinator = _make_coordinator(state)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry_id": coordinator}}
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
+
+    async_add_entities.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_async_setup_entry_skips_when_no_data() -> None:
     coordinator = _make_coordinator(None)
     hass = MagicMock()

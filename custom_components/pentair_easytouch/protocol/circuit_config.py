@@ -13,6 +13,7 @@ from custom_components.pentair_easytouch.protocol.valuemaps import (
     CIRCUIT_NAMES,
     CircuitFunction,
     is_light_function,
+    is_light_name,
 )
 
 if TYPE_CHECKING:
@@ -67,7 +68,7 @@ def decode_circuit_config(payload: bytes, state: PoolState) -> None:
         circuit_name = CIRCUIT_NAMES.get(name_id, f"Circuit {circuit_id}")
 
     # Determine if this is a light-type circuit
-    is_light = is_light_function(circuit_type)
+    is_light = is_light_function(circuit_type) or is_light_name(circuit_name)
 
     # Update the circuit in state
     circuit = state.get_circuit(circuit_id)

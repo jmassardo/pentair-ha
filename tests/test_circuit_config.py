@@ -42,6 +42,17 @@ class TestDecodeCircuitConfig:
         assert circuit.is_active is True
         assert circuit.is_light is True
 
+    def test_generic_circuit_named_pool_light_is_marked_as_light(self) -> None:
+        """Mixed light relays may use a generic function with a light name."""
+        state = PoolState()
+        payload = bytes([7, CircuitFunction.GENERIC, 63, 0, 0])
+
+        decode_circuit_config(payload, state)
+
+        circuit = state.get_circuit(7)
+        assert circuit.name == "Pool Light"
+        assert circuit.is_light is True
+
     def test_light_circuit_sam_light(self) -> None:
         """A SAM Light circuit should be marked as a light."""
         state = PoolState()

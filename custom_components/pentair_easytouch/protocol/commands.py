@@ -197,6 +197,18 @@ class CommandManager:
             ``True`` to turn the circuit on, ``False`` to turn it off.
         """
         _validate_range(circuit_id, _MIN_CIRCUIT_ID, _MAX_CIRCUIT_ID, "circuit_id")
+
+        # EasyTouch ignores "pool on" while spa mode is active. Returning a
+        # shared system to pool mode is accomplished by turning spa off.
+        if (
+            circuit_id == 6
+            and state
+            and self._state is not None
+            and self._state.get_circuit(1).is_on
+        ):
+            circuit_id = 1
+            state = False
+
         payload = [circuit_id, 1 if state else 0]
         _LOGGER.debug("CMD set_circuit_state circuit=%d state=%s", circuit_id, state)
         await self._send(ACTION_SET_CIRCUIT, payload)
@@ -214,7 +226,7 @@ class CommandManager:
         current_spa_setpoint: int = 100,
         current_pool_mode: int = 0,
         current_spa_mode: int = 0,
-        cool_setpoint: int = 0,
+        cool_setpoint: int | None = None,
     ) -> None:
         """Set the heat mode for a body (pool or spa).
 
@@ -237,13 +249,16 @@ class CommandManager:
         current_spa_mode:
             Current spa heat mode (0-3).
         cool_setpoint:
-            Cool setpoint for UltraTemp (default 0).
+            Current cool setpoint for UltraTemp. When omitted, preserve a
+            safe value one degree above the pool heat setpoint.
         """
         _validate_range(body_id, _MIN_BODY_ID, _MAX_BODY_ID, "body_id")
         _validate_range(mode, _MIN_HEAT_MODE, _MAX_HEAT_MODE, "mode")
 
         pool_mode = mode if body_id == 0 else current_pool_mode
         spa_mode = mode if body_id == 1 else current_spa_mode
+        if cool_setpoint is None:
+            cool_setpoint = min(current_pool_setpoint + 1, _MAX_TEMP_F)
 
         mode_byte = (spa_mode << 2) | pool_mode
         payload = [
@@ -271,7 +286,7 @@ class CommandManager:
         current_spa_setpoint: int = 100,
         current_pool_mode: int = 0,
         current_spa_mode: int = 0,
-        cool_setpoint: int = 0,
+        cool_setpoint: int | None = None,
     ) -> None:
         """Set the target temperature for a body (pool or spa).
 
@@ -293,13 +308,16 @@ class CommandManager:
         current_spa_mode:
             Current spa heat mode (0-3).
         cool_setpoint:
-            Cool setpoint for UltraTemp (default 0).
+            Current cool setpoint for UltraTemp. When omitted, preserve a
+            safe value one degree above the pool heat setpoint.
         """
         _validate_range(body_id, _MIN_BODY_ID, _MAX_BODY_ID, "body_id")
         _validate_range(temp, _MIN_TEMP_F, _MAX_TEMP_F, "temp")
 
         pool_setpoint = temp if body_id == 0 else current_pool_setpoint
         spa_setpoint = temp if body_id == 1 else current_spa_setpoint
+        if cool_setpoint is None:
+            cool_setpoint = min(pool_setpoint + 1, _MAX_TEMP_F)
 
         mode_byte = (current_spa_mode << 2) | current_pool_mode
         payload = [pool_setpoint, spa_setpoint, mode_byte, cool_setpoint]
