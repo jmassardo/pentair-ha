@@ -444,3 +444,12 @@ class TestDecodeIntellibrite:
         c.is_on = True
         decode_intellibrite(bytes([177]), state)
         assert c.lighting_theme == 0
+
+    def test_generic_light_named_circuit_updated(self) -> None:
+        state = PoolState()
+        c = state.get_circuit(7)
+        c.name = "Spa Light"
+        c.is_light = False
+        c.is_on = True
+        decode_intellibrite(bytes([193]), state)
+        assert c.lighting_theme == 193
