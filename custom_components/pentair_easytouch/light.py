@@ -16,7 +16,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import PentairCoordinator
-from .protocol.valuemaps import LIGHT_THEME_NAMES, LightTheme, is_light_name
+from .protocol.valuemaps import (
+    LIGHT_THEME_NAMES,
+    LIGHT_THEME_OPTIONS,
+    SELECTABLE_LIGHT_THEMES,
+    is_light_name,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -27,30 +32,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# Themes that are user-selectable effects
-_SELECTABLE_THEMES: list[LightTheme] = [
-    LightTheme.COLOR_SYNC,
-    LightTheme.COLOR_SWIM,
-    LightTheme.COLOR_SET,
-    LightTheme.PARTY,
-    LightTheme.ROMANCE,
-    LightTheme.CARIBBEAN,
-    LightTheme.AMERICAN,
-    LightTheme.SUNSET,
-    LightTheme.ROYAL,
-    LightTheme.BLUE,
-    LightTheme.GREEN,
-    LightTheme.RED,
-    LightTheme.WHITE,
-    LightTheme.MAGENTA,
-    LightTheme.THUMPER,
-    LightTheme.SAVE,
-    LightTheme.RECALL,
-]
-
-_THEME_NAME_TO_VALUE: dict[str, int] = {
-    LIGHT_THEME_NAMES[theme]: theme.value for theme in _SELECTABLE_THEMES
-}
+_THEME_NAME_TO_VALUE = LIGHT_THEME_OPTIONS
 
 
 async def async_setup_entry(
@@ -138,7 +120,7 @@ class PentairLight(CoordinatorEntity[PentairCoordinator], LightEntity):
     @property
     def effect_list(self) -> list[str]:
         """Return the list of supported effects."""
-        return [LIGHT_THEME_NAMES[theme] for theme in _SELECTABLE_THEMES]
+        return [LIGHT_THEME_NAMES[theme] for theme in SELECTABLE_LIGHT_THEMES]
 
     @property
     def available(self) -> bool:

@@ -250,6 +250,30 @@ LIGHT_THEME_NAMES: dict[int, str] = {
     LightTheme.NONE: "none",
 }
 
+SELECTABLE_LIGHT_THEMES: tuple[LightTheme, ...] = (
+    LightTheme.COLOR_SYNC,
+    LightTheme.COLOR_SWIM,
+    LightTheme.COLOR_SET,
+    LightTheme.PARTY,
+    LightTheme.ROMANCE,
+    LightTheme.CARIBBEAN,
+    LightTheme.AMERICAN,
+    LightTheme.SUNSET,
+    LightTheme.ROYAL,
+    LightTheme.BLUE,
+    LightTheme.GREEN,
+    LightTheme.RED,
+    LightTheme.WHITE,
+    LightTheme.MAGENTA,
+    LightTheme.THUMPER,
+    LightTheme.SAVE,
+    LightTheme.RECALL,
+)
+
+LIGHT_THEME_OPTIONS: dict[str, int] = {
+    LIGHT_THEME_NAMES[theme]: theme.value for theme in SELECTABLE_LIGHT_THEMES
+}
+
 
 # ---------------------------------------------------------------------------
 # Body type  (pool = body 1, spa = body 2)

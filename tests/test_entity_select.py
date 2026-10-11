@@ -7,9 +7,17 @@ import pytest
 
 from custom_components.pentair_easytouch.const import DOMAIN
 from custom_components.pentair_easytouch.coordinator import PentairCoordinator
-from custom_components.pentair_easytouch.model import PoolBody, PoolState
-from custom_components.pentair_easytouch.protocol.valuemaps import HeatMode
-from custom_components.pentair_easytouch.select import PentairHeatModeSelect, async_setup_entry
+from custom_components.pentair_easytouch.model import Circuit, PoolBody, PoolState
+from custom_components.pentair_easytouch.protocol.valuemaps import (
+    LIGHT_THEME_OPTIONS,
+    HeatMode,
+    LightTheme,
+)
+from custom_components.pentair_easytouch.select import (
+    PentairHeatModeSelect,
+    PentairLightThemeSelect,
+    async_setup_entry,
+)
 
 
 def _make_coordinator(state: PoolState | None = None) -> MagicMock:
@@ -32,6 +40,15 @@ def _make_state() -> PoolState:
     state.bodies = [
         PoolBody(id=1, name="Pool", set_point=84, heat_mode=HeatMode.HEATER),
         PoolBody(id=2, name="Spa", set_point=102, heat_mode=HeatMode.SOLAR_ONLY),
+    ]
+    state.circuits = [
+        Circuit(
+            id=7,
+            name="Spa Light",
+            is_light=False,
+            is_active=True,
+            lighting_theme=LightTheme.BLUE,
+        )
     ]
     return state
 
@@ -101,6 +118,52 @@ async def test_select_option_noops_when_body_missing() -> None:
     coordinator.command_manager.set_heat_mode.assert_not_called()
 
 
+def test_light_theme_select_properties() -> None:
+    coordinator = _make_coordinator(_make_state())
+    entity = PentairLightThemeSelect(coordinator, circuit_id=7)
+
+    assert entity.name == "Spa Light Theme"
+    assert entity.current_option == "blue"
+    assert entity.options == list(LIGHT_THEME_OPTIONS)
+    assert entity.available is True
+    assert entity.device_info == {
+        "identifiers": {(DOMAIN, "test_entry_id")},
+        "name": "Pentair EasyTouch",
+        "manufacturer": "Pentair",
+        "model": "EasyTouch",
+    }
+
+
+@pytest.mark.asyncio
+async def test_light_theme_select_sets_theme_and_turns_on_relay() -> None:
+    coordinator = _make_coordinator(_make_state())
+    entity = PentairLightThemeSelect(coordinator, circuit_id=7)
+
+    await entity.async_select_option("magenta")
+
+    coordinator.command_manager.set_circuit_state.assert_awaited_once_with(7, True)
+    coordinator.command_manager.set_light_theme.assert_awaited_once_with(LightTheme.MAGENTA.value)
+    circuit = coordinator.data.get_circuit(7)
+    assert circuit.is_on is True
+    assert circuit.lighting_theme == LightTheme.MAGENTA
+    coordinator.async_set_updated_data.assert_called_once_with(coordinator.data)
+
+
+@pytest.mark.asyncio
+async def test_light_theme_select_rejects_unknown_option(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    coordinator = _make_coordinator(_make_state())
+    entity = PentairLightThemeSelect(coordinator, circuit_id=7)
+
+    with caplog.at_level(logging.WARNING):
+        await entity.async_select_option("ultraviolet")
+
+    assert "Unknown light theme option: ultraviolet" in caplog.text
+    coordinator.command_manager.set_circuit_state.assert_not_called()
+    coordinator.command_manager.set_light_theme.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_async_setup_entry_adds_heat_mode_selects() -> None:
     coordinator = _make_coordinator(_make_state())
@@ -111,7 +174,11 @@ async def test_async_setup_entry_adds_heat_mode_selects() -> None:
     await async_setup_entry(hass, coordinator.config_entry, async_add_entities)
 
     entities = async_add_entities.call_args.args[0]
-    assert [entity.name for entity in entities] == ["Pool Heat Mode", "Spa Heat Mode"]
+    assert [entity.name for entity in entities] == [
+        "Pool Heat Mode",
+        "Spa Heat Mode",
+        "Spa Light Theme",
+    ]
 
     # Listener should be registered for dynamic discovery
     coordinator.async_add_listener.assert_called_once()
