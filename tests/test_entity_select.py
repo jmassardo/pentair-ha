@@ -138,9 +138,20 @@ def test_light_theme_select_properties() -> None:
 async def test_light_theme_select_sets_theme_and_turns_on_relay() -> None:
     coordinator = _make_coordinator(_make_state())
     entity = PentairLightThemeSelect(coordinator, circuit_id=7)
+    calls: list[tuple[str, int | bool]] = []
+    coordinator.command_manager.set_light_theme.side_effect = lambda theme: calls.append(
+        ("theme", theme)
+    )
+    coordinator.command_manager.set_circuit_state.side_effect = lambda circuit_id, state: (
+        calls.append(("circuit", state))
+    )
 
     await entity.async_select_option("magenta")
 
+    assert calls == [
+        ("theme", LightTheme.MAGENTA.value),
+        ("circuit", True),
+    ]
     coordinator.command_manager.set_circuit_state.assert_awaited_once_with(7, True)
     coordinator.command_manager.set_light_theme.assert_awaited_once_with(LightTheme.MAGENTA.value)
     circuit = coordinator.data.get_circuit(7)

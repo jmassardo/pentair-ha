@@ -348,7 +348,9 @@ class CommandManager:
         _validate_range(theme, _MIN_LIGHT_THEME, _MAX_LIGHT_THEME, "theme")
         payload = [theme, 0]
         _LOGGER.debug("CMD set_light_theme theme=%d", theme)
-        await self._send(ACTION_INTELLIBRITE, payload)
+        # Action 96 starts a controller-managed power-cycle sequence. Repeating
+        # it restarts that sequence and can leave the relay off much longer.
+        await self._send(ACTION_INTELLIBRITE, payload, retries=0)
 
     # ------------------------------------------------------------------
     # Chlorinator control

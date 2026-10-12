@@ -240,6 +240,7 @@ class TestSetLightTheme:
         assert pkt.action == ACTION_INTELLIBRITE  # 96
         assert pkt.dest == CONTROLLER_ADDR
         assert pkt.payload == bytes([177, 0])
+        assert len(transport.written) == 1
 
     async def test_off_theme(self, transport: FakeTransport, cmd: CommandManager) -> None:
         await cmd.set_light_theme(0)

@@ -237,8 +237,8 @@ class PentairLightThemeSelect(CoordinatorEntity[PentairCoordinator], SelectEntit
         if circuit is None:
             return
 
-        await self.coordinator.command_manager.set_circuit_state(circuit.id, True)
         await self.coordinator.command_manager.set_light_theme(theme)
+        await self.coordinator.command_manager.set_circuit_state(circuit.id, True)
         circuit.is_on = True
         for light in self.coordinator.data.circuits:
             if light.is_on and (light.is_light or is_light_name(light.name)):
