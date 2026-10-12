@@ -27,6 +27,7 @@ def _make_coordinator_mock() -> MagicMock:
     """Create a mock coordinator with real _first_update_event and methods."""
     coordinator = MagicMock(spec=PentairCoordinator)
     coordinator._first_update_event = asyncio.Event()
+    coordinator._status_received_event = asyncio.Event()
     coordinator._state = PoolState()
     coordinator._status_received = False
     coordinator._config_received = False
@@ -63,7 +64,7 @@ async def test_wait_for_first_update_times_out_gracefully(
     with caplog.at_level(logging.WARNING):
         await coordinator.wait_for_first_update(timeout=0.05)
 
-    assert "Timed out waiting for first status broadcast" in caplog.text
+    assert "Timed out waiting for controller discovery" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -77,6 +78,7 @@ async def test_on_state_updated_does_not_fire_event_on_status_only() -> None:
     coordinator._on_state_updated()
 
     assert coordinator._status_received is True
+    assert coordinator._status_received_event.is_set()
     assert coordinator._config_received is False
     assert not coordinator._first_update_event.is_set()
     # async_set_updated_data should still be called
@@ -192,7 +194,7 @@ async def test_timeout_fallback_when_config_never_arrives(
     with caplog.at_level(logging.WARNING):
         await coordinator.wait_for_first_update(timeout=0.05)
 
-    assert "Timed out waiting for first status broadcast" in caplog.text
+    assert "Timed out waiting for controller discovery" in caplog.text
     # Fallback activates ALL circuits in range 1-20, not just ON ones
     assert coordinator._first_update_event.is_set()
     for circuit in coordinator._state.circuits:
@@ -206,6 +208,8 @@ async def test_async_request_config_sends_requests() -> None:
     coordinator = MagicMock(spec=PentairCoordinator)
     coordinator._command_manager = AsyncMock()
     coordinator._command_manager.request_config = AsyncMock()
+    coordinator._status_received_event = asyncio.Event()
+    coordinator._status_received_event.set()
 
     # Bind the real method
     coordinator._async_request_config = PentairCoordinator._async_request_config.__get__(
@@ -240,10 +244,39 @@ async def test_async_request_config_sends_requests() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_request_config_waits_for_status_version() -> None:
+    """Config discovery waits until a status packet supplies the protocol version."""
+    coordinator = MagicMock(spec=PentairCoordinator)
+    coordinator._command_manager = AsyncMock()
+    coordinator._command_manager.request_config = AsyncMock()
+    coordinator._status_received_event = asyncio.Event()
+    coordinator._async_request_config = PentairCoordinator._async_request_config.__get__(
+        coordinator, PentairCoordinator
+    )
+
+    with patch(
+        "custom_components.pentair_easytouch.coordinator.asyncio.sleep",
+        new_callable=AsyncMock,
+    ):
+        request_task = asyncio.create_task(coordinator._async_request_config())
+        await asyncio.sleep(0)
+        coordinator._command_manager.request_config.assert_not_awaited()
+
+        coordinator._status_received_event.set()
+        await request_task
+
+    assert coordinator._command_manager.request_config.await_count == (
+        _CUSTOM_NAME_COUNT + _CONFIG_CIRCUIT_MAX - _CONFIG_CIRCUIT_MIN + 1
+    )
+
+
+@pytest.mark.asyncio
 async def test_async_request_config_handles_transport_errors() -> None:
     """_async_request_config continues if a single request fails."""
     coordinator = MagicMock(spec=PentairCoordinator)
     coordinator._command_manager = AsyncMock()
+    coordinator._status_received_event = asyncio.Event()
+    coordinator._status_received_event.set()
 
     call_count = 0
 
@@ -276,12 +309,18 @@ async def test_start_sends_config_requests() -> None:
     coordinator._transport = AsyncMock()
     coordinator._async_request_config = AsyncMock()
     coordinator._async_refresh_chlorinator = AsyncMock()
+    coordinator._config_request_task = None
+    coordinator._chlorinator_refresh_task = None
+    coordinator._schedule_config_request = PentairCoordinator._schedule_config_request.__get__(
+        coordinator,
+        PentairCoordinator,
+    )
 
     # Bind the real start method
     coordinator.start = PentairCoordinator.start.__get__(coordinator, PentairCoordinator)
 
     with patch(
-        "custom_components.pentair_easytouch.coordinator.asyncio.create_task",
+        "custom_components.pentair_easytouch.coordinator.asyncio.create_task"
     ) as mock_create_task:
         await coordinator.start()
 
@@ -368,16 +407,20 @@ async def test_on_connection_changed_reconnect_requests_config() -> None:
     coordinator = _make_coordinator_mock()
     coordinator._async_request_config = AsyncMock()
     coordinator._config_request_task = None
+    coordinator._schedule_config_request = PentairCoordinator._schedule_config_request.__get__(
+        coordinator,
+        PentairCoordinator,
+    )
     coordinator._on_connection_changed = PentairCoordinator._on_connection_changed.__get__(
         coordinator, PentairCoordinator
     )
 
     with patch(
-        "custom_components.pentair_easytouch.coordinator.asyncio.ensure_future",
-    ) as mock_ensure:
+        "custom_components.pentair_easytouch.coordinator.asyncio.create_task",
+    ) as mock_create:
         coordinator._on_connection_changed(True)
 
-    mock_ensure.assert_called_once()
+    mock_create.assert_called_once()
     # Clean up coroutine
-    coro = mock_ensure.call_args[0][0]
+    coro = mock_create.call_args[0][0]
     coro.close()

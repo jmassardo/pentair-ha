@@ -82,9 +82,20 @@ def test_light_fallbacks() -> None:
 async def test_light_turn_on_with_effect() -> None:
     coordinator = _make_coordinator(_make_state())
     entity = PentairLight(coordinator, circuit_id=7)
+    calls: list[tuple[str, int | bool]] = []
+    coordinator.command_manager.set_light_theme.side_effect = lambda theme: calls.append(
+        ("theme", theme)
+    )
+    coordinator.command_manager.set_circuit_state.side_effect = lambda circuit_id, state: (
+        calls.append(("circuit", state))
+    )
 
     await entity.async_turn_on(**{ATTR_EFFECT: "caribbean"})
 
+    assert calls == [
+        ("theme", LightTheme.CARIBBEAN.value),
+        ("circuit", True),
+    ]
     coordinator.command_manager.set_circuit_state.assert_awaited_once_with(7, True)
     coordinator.command_manager.set_light_theme.assert_awaited_once_with(LightTheme.CARIBBEAN.value)
 

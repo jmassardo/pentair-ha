@@ -95,6 +95,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
 
         # Signals when the first status broadcast has been received and processed
         self._first_update_event = asyncio.Event()
+        self._status_received_event = asyncio.Event()
 
         # Dual-gate flags: entity discovery waits for BOTH status and config
         self._status_received = False
@@ -122,15 +123,17 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         """Start the transport connection and begin listening."""
         _LOGGER.info("Starting Pentair EasyTouch coordinator")
         await self._transport.connect()
-        # Request circuit configuration from the controller.
-        # The controller only broadcasts Action 11 during power-up, so we
-        # must actively request it if we start after the controller.
-        self._config_request_task = asyncio.create_task(self._async_request_config())
+        self._schedule_config_request()
         self._chlorinator_refresh_task = asyncio.create_task(self._async_refresh_chlorinator())
 
     async def stop(self) -> None:
         """Disconnect transport and clean up."""
         _LOGGER.info("Stopping Pentair EasyTouch coordinator")
+        if self._config_request_task and not self._config_request_task.done():
+            self._config_request_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._config_request_task
+        self._config_request_task = None
         if self._chlorinator_refresh_task and not self._chlorinator_refresh_task.done():
             self._chlorinator_refresh_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -152,7 +155,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
             await asyncio.wait_for(self._first_update_event.wait(), timeout)
         except TimeoutError:
             _LOGGER.warning(
-                "Timed out waiting for first status broadcast after %.1fs. "
+                "Timed out waiting for controller discovery after %.1fs. "
                 "Entities will be added as equipment is discovered.",
                 timeout,
             )
@@ -196,10 +199,15 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         """
         if connected:
             _LOGGER.info("Transport reconnected — requesting config")
-            self._config_request_task = asyncio.ensure_future(self._async_request_config())
+            self._schedule_config_request()
         else:
             _LOGGER.warning("Transport disconnected — entities unavailable")
             self.async_set_update_error(ConnectionError("RS485 transport disconnected"))
+
+    def _schedule_config_request(self) -> None:
+        """Schedule config discovery unless one is already running."""
+        if self._config_request_task is None or self._config_request_task.done():
+            self._config_request_task = asyncio.create_task(self._async_request_config())
 
     @callback
     def _on_state_updated(self) -> None:
@@ -215,6 +223,7 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
             # Check for status: any circuit existing means Action 2 arrived
             if self._state.circuits and not self._status_received:
                 self._status_received = True
+                self._status_received_event.set()
                 _LOGGER.debug("First status broadcast received")
             # Check for config: any circuit with a non-empty name means
             # Action 11 data has been processed
@@ -230,6 +239,9 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
     async def _async_request_config(self) -> None:
         """Send GET_CUSTOM_NAMES and GET_CIRCUITS requests.
 
+        Wait for the first status broadcast before sending requests so outbound
+        packets use the protocol version advertised by the controller.
+
         Custom names (Action 10, slots 0-9) are requested first so that
         when circuit config (Action 11) arrives, custom name references
         (name_id >= 200) can be resolved immediately.
@@ -238,6 +250,8 @@ class PentairCoordinator(DataUpdateCoordinator[PoolState]):
         RS485 bus, matching the reference implementation
         (nodejs-poolController).
         """
+        await self._status_received_event.wait()
+
         # --- Phase 1: request custom names (slots 0-9) ---
         _LOGGER.debug(
             "Requesting custom names for slots 0-%d",
